@@ -167,7 +167,7 @@ class GESTUREBONE_PT_GestureDrawGestures(bpy.types.Panel):
             # Wide draw toggle
             draw_sub = row.row(align=True)
             draw_sub.scale_x = 4.0
-            draw_sub.active_default = chain.is_drawing
+            draw_sub.alert = chain.is_drawing
             op = draw_sub.operator(
                 "gesturebone.toggle_drawing",
                 text=chain.part_name or f"Chain {i + 1}",

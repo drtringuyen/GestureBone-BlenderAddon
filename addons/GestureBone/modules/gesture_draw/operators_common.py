@@ -1,6 +1,6 @@
 import bpy
 from bpy.props import IntProperty
-from .utils import _arm, _mod_props
+from .utils import _arm, _mod_props, _find_gn_modifier, _find_socket_id
 
 
 class GESTUREBONE_OT_AddChain(bpy.types.Operator):
@@ -49,14 +49,24 @@ class GESTUREBONE_OT_TogglePoseGP(bpy.types.Operator):
         arm_obj = _arm(context)
         return arm_obj is not None and context.view_layer.objects.active == arm_obj
 
+    def _set_gp_visible(self, gp_obj, visible):
+        mod = _find_gn_modifier(gp_obj)
+        if mod:
+            socket_id = _find_socket_id(mod, "Invisible")
+            if socket_id:
+                mod[socket_id] = not visible
+                gp_obj.update_tag()
+
     def execute(self, context):
         arm_obj = _arm(context)
         mod_props = _mod_props(context)
+        gp_obj = (mod_props.part_gp if mod_props else None) or context.scene.gesturebone_props.current_gp
         if self._going_to_gp(context):
-            gp_obj = (mod_props.part_gp if mod_props else None) or context.scene.gesturebone_props.current_gp
             if not gp_obj:
                 self.report({'ERROR'}, "No GP object assigned")
                 return {'CANCELLED'}
+            if gp_obj:
+                self._set_gp_visible(gp_obj, True)
             if context.object and context.object.mode != 'OBJECT':
                 bpy.ops.object.mode_set(mode='OBJECT')
             bpy.ops.object.select_all(action='DESELECT')
@@ -66,6 +76,8 @@ class GESTUREBONE_OT_TogglePoseGP(bpy.types.Operator):
             if not arm_obj:
                 self.report({'ERROR'}, "No armature active")
                 return {'CANCELLED'}
+            if gp_obj:
+                self._set_gp_visible(gp_obj, False)
             if context.object and context.object.mode != 'OBJECT':
                 bpy.ops.object.mode_set(mode='OBJECT')
             bpy.ops.object.select_all(action='DESELECT')

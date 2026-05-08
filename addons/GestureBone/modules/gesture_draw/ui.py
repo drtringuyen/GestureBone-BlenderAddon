@@ -1,6 +1,19 @@
 import bpy
 
 
+def _chain_is_ready(chain):
+    has_bone = any([chain.bone_0, chain.bone_1, chain.bone_2, chain.bone_3, chain.bone_4])
+    return chain.part_gp is not None and chain.is_bound and has_bone
+
+
+def _active_arm(context):
+    obj = context.active_object
+    if obj and obj.type == 'ARMATURE':
+        return obj
+    fallback = context.scene.gesturebone_props.current_armature
+    return fallback if fallback and fallback.type == 'ARMATURE' else None
+
+
 class GESTUREBONE_PT_GestureDraw(bpy.types.Panel):
     bl_label = "GestureDraw"
     bl_idname = "GESTUREBONE_PT_gesture_draw"
@@ -27,47 +40,61 @@ class GESTUREBONE_PT_GestureDrawBinding(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
-        mod_props = context.scene.gesturebone_gesture_draw_props
+        arm = _active_arm(context)
 
-        # Add / Remove row
+        if arm is None:
+            row = layout.row()
+            row.alert = True
+            row.label(text="Select an armature to bind chains", icon='ERROR')
+            return
+
+        mod_props = getattr(arm, 'gesturebone_gesture_draw_props', None)
+        if mod_props is None:
+            layout.label(text="Properties not initialized", icon='ERROR')
+            return
+
         row = layout.row(align=True)
         row.operator("gesturebone.add_chain", icon='ADD', text="Add Chain")
         if mod_props.chains:
             row.operator("gesturebone.remove_chain", icon='REMOVE', text="").chain_index = len(mod_props.chains) - 1
 
         for i, chain in enumerate(mod_props.chains):
+            ready = _chain_is_ready(chain)
             box = layout.box()
 
-            # Row 1: name | GP | material | armature | bind toggle
-            row = box.row(align=True)
-            row.prop(chain, "part_name", text="")
-            row.prop(chain, "part_gp", text="", icon='GREASEPENCIL')
-            row.prop(chain, "part_material", text="", icon='MATERIAL')
-            row.prop(chain, "part_armature", text="", icon='ARMATURE_DATA')
-
-            sub = row.row(align=True)
-            sub.active_default = chain.is_bound
-            if chain.is_bound:
-                op = sub.operator("gesturebone.delete_bone_constraints", text="", icon='LINKED')
-            else:
-                op = sub.operator("gesturebone.create_bone_constraints", text="", icon='UNLINKED')
-            op.chain_index = i
-
-            # Row 2: collapsible bones
-            row2 = box.row()
-            row2.prop(
+            # ── Header row: collapse toggle | status | name | bind ──────────
+            header = box.row(align=True)
+            header.prop(
                 chain, "bones_expanded",
-                text="Bones",
+                text="",
                 icon='TRIA_DOWN' if chain.bones_expanded else 'TRIA_RIGHT',
                 emboss=False,
             )
+            header.label(text="", icon='LAYER_ACTIVE' if ready else 'ERROR')
+            header.prop(chain, "part_name", text="")
+
+            bind_sub = header.row(align=True)
+            bind_sub.active_default = chain.is_bound
+            if chain.is_bound:
+                op = bind_sub.operator("gesturebone.delete_bone_constraints", text="", icon='LINKED')
+            else:
+                op = bind_sub.operator("gesturebone.create_bone_constraints", text="", icon='UNLINKED')
+            op.chain_index = i
+
+            # ── Body (only when expanded) ───────────────────────────────────
             if chain.bones_expanded:
+                # Row: "Bindings" label + GP + material
+                bind_row = box.row(align=True)
+                bind_row.label(text="Bindings")
+                gp_sub = bind_row.row(align=True)
+                gp_sub.alert = chain.part_gp is None
+                gp_sub.prop(chain, "part_gp", text="", icon='GREASEPENCIL')
+                bind_row.prop(chain, "part_material", text="", icon='MATERIAL')
+
+                # Bone rows 1–5
                 col = box.column(align=True)
-                col.prop(chain, "bone_0")
-                col.prop(chain, "bone_1")
-                col.prop(chain, "bone_2")
-                col.prop(chain, "bone_3")
-                col.prop(chain, "bone_4")
+                for j, attr in enumerate(["bone_0", "bone_1", "bone_2", "bone_3", "bone_4"]):
+                    col.prop(chain, attr, text=f"Bone {j + 1}")
 
 
 class GESTUREBONE_PT_GestureDrawGestures(bpy.types.Panel):
@@ -83,7 +110,17 @@ class GESTUREBONE_PT_GestureDrawGestures(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
-        mod_props = context.scene.gesturebone_gesture_draw_props
+        arm = _active_arm(context)
+
+        if arm is None:
+            row = layout.row()
+            row.alert = True
+            row.label(text="Select an armature", icon='ERROR')
+            return
+
+        mod_props = getattr(arm, 'gesturebone_gesture_draw_props', None)
+        if mod_props is None:
+            return
 
         if not mod_props.chains:
             layout.label(text="No chains — add in Binding", icon='INFO')
@@ -91,19 +128,32 @@ class GESTUREBONE_PT_GestureDrawGestures(bpy.types.Panel):
 
         for i, chain in enumerate(mod_props.chains):
             row = layout.row(align=True)
-            row.label(text=chain.part_name or f"Chain {i + 1}", icon='STROKE')
 
-            # Draw toggle (GP draw mode + material)
-            draw_sub = row.row(align=True)
-            draw_sub.active_default = chain.is_drawing
-            op = draw_sub.operator("gesturebone.toggle_drawing", text="", icon='GREASEPENCIL')
+            # Visibility dot (1 unit)
+            is_visible = bool(chain.part_gp and not chain.part_gp.hide_viewport)
+            vis_sub = row.row(align=True)
+            vis_sub.active_default = is_visible
+            op = vis_sub.operator(
+                "gesturebone.toggle_gp_visibility", text="",
+                icon='LAYER_ACTIVE' if is_visible else 'LAYER_USED',
+            )
             op.chain_index = i
 
-            # Key (apply visual + insert keyframe)
+            # Wide draw toggle (scale_x=4 → takes ~4x a normal icon button)
+            draw_sub = row.row(align=True)
+            draw_sub.scale_x = 4.0
+            draw_sub.active_default = chain.is_drawing
+            op = draw_sub.operator(
+                "gesturebone.toggle_drawing",
+                text=chain.part_name or f"Chain {i + 1}",
+                icon='GREASEPENCIL',
+            )
+            op.chain_index = i
+
+            # Apply+key | bind | edit pose (1 unit each)
             op = row.operator("gesturebone.apply_and_key_bone_constraints", text="", icon='KEY_HLT')
             op.chain_index = i
 
-            # Bind toggle
             bind_sub = row.row(align=True)
             bind_sub.active_default = chain.is_bound
             if chain.is_bound:
@@ -112,7 +162,6 @@ class GESTUREBONE_PT_GestureDrawGestures(bpy.types.Panel):
                 op = bind_sub.operator("gesturebone.create_bone_constraints", text="", icon='UNLINKED')
             op.chain_index = i
 
-            # Edit Pose
             op = row.operator("gesturebone.edit_pose", text="", icon='BONE_DATA')
             op.chain_index = i
 

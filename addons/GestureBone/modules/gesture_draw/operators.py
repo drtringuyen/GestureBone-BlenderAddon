@@ -21,10 +21,11 @@ class GESTUREBONE_OT_CreateBoneConstraints(bpy.types.Operator):
 
     def execute(self, context):
         arm_obj = _arm(context)
+        mod_props = _mod_props(context)
         chain = _get_chain(context, self.chain_index)
         if arm_obj is None or chain is None:
             return {'CANCELLED'}
-        gp_obj = chain.part_gp or context.scene.gesturebone_props.current_gp
+        gp_obj = (mod_props.part_gp if mod_props else None) or context.scene.gesturebone_props.current_gp
         if not gp_obj:
             self.report({'ERROR'}, "GP object not set on this chain")
             return {'CANCELLED'}
@@ -124,7 +125,7 @@ class GESTUREBONE_OT_ToggleDrawing(bpy.types.Operator):
         if mod_props is None or chain is None:
             return {'CANCELLED'}
         arm_obj = _arm(context)
-        gp_obj = chain.part_gp or context.scene.gesturebone_props.current_gp
+        gp_obj = mod_props.part_gp or context.scene.gesturebone_props.current_gp
 
         if chain.is_drawing:
             if arm_obj and _constraints_exist(arm_obj, chain):
@@ -160,7 +161,7 @@ class GESTUREBONE_OT_ToggleDrawing(bpy.types.Operator):
             # Prepare GP frame data before entering paint mode so the copy is
             # not disrupted by mode-switch side-effects on GP data.
             frame_num = context.scene.frame_current
-            _copy_last_frame_strokes(chain, frame_num)
+            _copy_last_frame_strokes(chain, gp_obj, frame_num)
             # Fallback: ensure every layer has a frame at frame_current
             for layer in gp_obj.data.layers:
                 try:
@@ -183,7 +184,7 @@ class GESTUREBONE_OT_ToggleDrawing(bpy.types.Operator):
                     bpy.ops.gesturebone.create_bone_constraints(chain_index=self.chain_index)
                 # Count strokes after the frame is ready, before unmuting so the
                 # depsgraph handler doesn't see a stale baseline and double-bake.
-                chain.stroke_count_cache = _count_strokes_at_frame(chain, frame_num)
+                chain.stroke_count_cache = _count_strokes_at_frame(chain, gp_obj, frame_num)
                 _unmute_constraints(arm_obj, chain)
             chain.drawing_frame = frame_num
             chain.is_drawing = True
@@ -198,10 +199,11 @@ class GESTUREBONE_OT_ToggleGPVisibility(bpy.types.Operator):
     chain_index: IntProperty()
 
     def execute(self, context):
+        mod_props = _mod_props(context)
         chain = _get_chain(context, self.chain_index)
-        if not chain or not chain.part_gp:
+        if not chain or not (mod_props and mod_props.part_gp):
             return {'CANCELLED'}
-        gp_obj = chain.part_gp
+        gp_obj = mod_props.part_gp
         mod = _find_gn_modifier(gp_obj)
         if not mod:
             mod = gp_obj.modifiers.new(name="TOB-Gesture_drawing", type='NODES')

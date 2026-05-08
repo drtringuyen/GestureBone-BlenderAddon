@@ -1,6 +1,6 @@
 import bpy
 from bpy.props import IntProperty
-from .utils import _arm, _mod_props
+from .utils import _arm, _mod_props, _get_chain
 
 
 class GESTUREBONE_OT_AddChain(bpy.types.Operator):
@@ -16,8 +16,8 @@ class GESTUREBONE_OT_AddChain(bpy.types.Operator):
         global_props = context.scene.gesturebone_props
         chain = mod_props.chains.add()
         chain.part_name = f"Chain {len(mod_props.chains)}"
-        if global_props.current_gp:
-            chain.part_gp = global_props.current_gp
+        if global_props.current_gp and not mod_props.part_gp:
+            mod_props.part_gp = global_props.current_gp
         mod_props.active_chain_index = len(mod_props.chains) - 1
         return {'FINISHED'}
 
@@ -36,6 +36,25 @@ class GESTUREBONE_OT_RemoveChain(bpy.types.Operator):
         if 0 <= idx < len(mod_props.chains):
             mod_props.chains.remove(idx)
             mod_props.active_chain_index = max(0, idx - 1)
+        return {'FINISHED'}
+
+
+class GESTUREBONE_OT_SetActiveGP(bpy.types.Operator):
+    """Set the shared GP object as active in Object mode"""
+    bl_idname = "gesturebone.set_active_gp"
+    bl_label = "Set Active GP"
+
+    def execute(self, context):
+        mod_props = _mod_props(context)
+        gp_obj = mod_props.part_gp if mod_props else None
+        if not gp_obj:
+            self.report({'ERROR'}, "No GP object assigned")
+            return {'CANCELLED'}
+        if context.object and context.object.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+        bpy.ops.object.select_all(action='DESELECT')
+        gp_obj.select_set(True)
+        context.view_layer.objects.active = gp_obj
         return {'FINISHED'}
 
 
@@ -61,10 +80,12 @@ class GESTUREBONE_OT_EditPose(bpy.types.Operator):
 def register():
     bpy.utils.register_class(GESTUREBONE_OT_AddChain)
     bpy.utils.register_class(GESTUREBONE_OT_RemoveChain)
+    bpy.utils.register_class(GESTUREBONE_OT_SetActiveGP)
     bpy.utils.register_class(GESTUREBONE_OT_EditPose)
 
 
 def unregister():
     bpy.utils.unregister_class(GESTUREBONE_OT_EditPose)
+    bpy.utils.unregister_class(GESTUREBONE_OT_SetActiveGP)
     bpy.utils.unregister_class(GESTUREBONE_OT_RemoveChain)
     bpy.utils.unregister_class(GESTUREBONE_OT_AddChain)

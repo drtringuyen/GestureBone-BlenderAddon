@@ -80,7 +80,8 @@ class GESTUREBONE_OT_DeleteBakedFrames(bpy.types.Operator):
                                 fc.keyframe_points.remove(kp)
 
         # 2. Remove GP strokes at frame_num and delete the frame entry if now empty
-        gp_obj = chain.part_gp
+        mod_props = _mod_props(context)
+        gp_obj = mod_props.part_gp if mod_props else None
         mat = chain.part_material
         if gp_obj:
             try:
@@ -120,10 +121,10 @@ class GESTUREBONE_OT_BakeAllChains(bpy.types.Operator):
         baked = 0
         prev_frame = context.scene.frame_current
 
+        gp_obj = mod_props.part_gp
         for chain in mod_props.chains:
-            if not chain.is_bound or not chain.part_gp:
+            if not chain.is_bound or not gp_obj:
                 continue
-            gp_obj = chain.part_gp
             mat = chain.part_material
 
             gp_frames = set()
@@ -201,10 +202,10 @@ def _check_drawing_state(scene, depsgraph):
             props = obj.gesturebone_gesture_draw_props
         except AttributeError:
             continue
+        gp_obj = props.part_gp
         for chain in props.chains:
             if not chain.is_drawing:
                 continue
-            gp_obj = chain.part_gp
             if active != gp_obj or mode != 'PAINT_GREASE_PENCIL':
                 # Unexpected exit: bake whatever pose is live before losing constraint state
                 _apply_and_key_data(obj, chain, scene.frame_current, depsgraph)
@@ -219,7 +220,7 @@ def _check_drawing_state(scene, depsgraph):
                 chain.drawing_frame = -1
             else:
                 frame_num = scene.frame_current
-                new_count = _count_strokes_at_frame(chain, frame_num)
+                new_count = _count_strokes_at_frame(chain, gp_obj, frame_num)
                 if new_count > chain.stroke_count_cache:
                     # New stroke drawn on the drawing frame
                     chain.stroke_count_cache = new_count

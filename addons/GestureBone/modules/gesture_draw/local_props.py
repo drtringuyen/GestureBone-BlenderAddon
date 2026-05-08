@@ -4,6 +4,11 @@ from .curve_bone_chain import GESTUREBONE_PG_CurveBoneChain
 
 
 class GESTUREBONE_GESTUREDRAW_PG_Props(bpy.types.PropertyGroup):
+    part_gp: PointerProperty(
+        name="GP",
+        type=bpy.types.Object,
+        poll=lambda self, obj: obj.type == 'GREASEPENCIL',
+    )
     chains: CollectionProperty(type=GESTUREBONE_PG_CurveBoneChain)
     active_chain_index: IntProperty(default=0, min=0)
 

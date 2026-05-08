@@ -143,9 +143,8 @@ def _apply_and_key_data(arm_obj, chain, frame, depsgraph):
     chain.last_baked_frame = max(chain.last_baked_frame, frame)
 
 
-def _count_strokes_at_frame(chain, frame_num):
+def _count_strokes_at_frame(chain, gp_obj, frame_num):
     """Count strokes matching part_material at a specific GP frame number."""
-    gp_obj = chain.part_gp
     mat = chain.part_material
     if not gp_obj:
         return 0
@@ -214,13 +213,12 @@ def _remove_matching_strokes(gp_frame, gp_obj, mat):
         strokes.remove(stroke)
 
 
-def _copy_last_frame_strokes(chain, frame_num):
+def _copy_last_frame_strokes(chain, gp_obj, frame_num):
     """Copy strokes matching part_material from the nearest previous GP frame to frame_num.
 
     Only copies if the target frame has no matching strokes yet.
     Supports both GP2 (Blender < 4.3, frame.strokes) and GP3 (Blender 4.3+, frame.drawing).
     """
-    gp_obj = chain.part_gp
     mat = chain.part_material
     if not gp_obj:
         return

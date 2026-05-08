@@ -11,11 +11,6 @@ def _bone_search(self, context, edit_text):
 
 class GESTUREBONE_PG_CurveBoneChain(bpy.types.PropertyGroup):
     part_name: StringProperty(name="Name", default="Chain")
-    part_gp: PointerProperty(
-        name="GP",
-        type=bpy.types.Object,
-        poll=lambda self, obj: obj.type == 'GREASEPENCIL',
-    )
     part_material: PointerProperty(name="Material", type=bpy.types.Material)
     bone_0: StringProperty(name="1", search=_bone_search)
     bone_1: StringProperty(name="2", search=_bone_search)

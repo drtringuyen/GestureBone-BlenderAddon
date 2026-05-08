@@ -2,9 +2,9 @@ import bpy
 from .utils import _find_gn_modifier, _find_socket_id, _constraints_are_muted, _constraints_exist
 
 
-def _chain_is_ready(chain):
+def _chain_is_ready(mod_props, chain):
     has_bone = any([chain.bone_0, chain.bone_1, chain.bone_2, chain.bone_3, chain.bone_4])
-    return chain.part_gp is not None and chain.is_bound and has_bone
+    return mod_props.part_gp is not None and chain.is_bound and has_bone
 
 
 def _active_arm(context):
@@ -15,11 +15,12 @@ def _active_arm(context):
     return fallback if fallback and fallback.type == 'ARMATURE' else None
 
 
-def _get_gp_invisible(chain):
+def _get_gp_invisible(mod_props):
     """Return True if the GP Invisible socket is ON (i.e. geometry is hidden)."""
-    if not chain.part_gp:
+    gp_obj = mod_props.part_gp if mod_props else None
+    if not gp_obj:
         return False
-    mod = _find_gn_modifier(chain.part_gp)
+    mod = _find_gn_modifier(gp_obj)
     if not mod:
         return False
     sid = _find_socket_id(mod, "Invisible")
@@ -67,13 +68,17 @@ class GESTUREBONE_PT_GestureDrawBinding(bpy.types.Panel):
             layout.label(text="Properties not initialized", icon='ERROR')
             return
 
+        gp_row = layout.row(align=True)
+        gp_row.alert = mod_props.part_gp is None
+        gp_row.prop(mod_props, "part_gp", text="GP", icon='GREASEPENCIL')
+
         row = layout.row(align=True)
         row.operator("gesturebone.add_chain", icon='ADD', text="Add Chain")
         if mod_props.chains:
             row.operator("gesturebone.remove_chain", icon='REMOVE', text="").chain_index = len(mod_props.chains) - 1
 
         for i, chain in enumerate(mod_props.chains):
-            ready = _chain_is_ready(chain)
+            ready = _chain_is_ready(mod_props, chain)
             box = layout.box()
 
             # ── Header row: collapse toggle | status | name | bind ──────────
@@ -99,9 +104,6 @@ class GESTUREBONE_PT_GestureDrawBinding(bpy.types.Panel):
             if chain.bones_expanded:
                 bind_row = box.row(align=True)
                 bind_row.label(text="Bindings")
-                gp_sub = bind_row.row(align=True)
-                gp_sub.alert = chain.part_gp is None
-                gp_sub.prop(chain, "part_gp", text="", icon='GREASEPENCIL')
                 bind_row.prop(chain, "part_material", text="", icon='MATERIAL')
 
                 col = box.column(align=True)
@@ -134,9 +136,10 @@ class GESTUREBONE_PT_GestureDrawGestures(bpy.types.Panel):
         if mod_props is None:
             return
 
-        # ── Top row: global Edit Pose + Bake All + Delete All ───────────────
+        # ── Top row: global Edit Pose + Set GP + Bake All + Delete All ────────
         top_row = layout.row(align=True)
         top_row.operator("gesturebone.edit_pose", text="Edit Pose", icon='ARMATURE_DATA')
+        top_row.operator("gesturebone.set_active_gp", text="", icon='GREASEPENCIL')
         top_row.operator("gesturebone.bake_all_chains", text="Bake All", icon='FILE_REFRESH')
         top_row.operator("gesturebone.delete_all_baked_frames", text="", icon='TRASH')
 
@@ -149,7 +152,7 @@ class GESTUREBONE_PT_GestureDrawGestures(bpy.types.Panel):
             row = layout.row(align=True)
 
             # Visibility eye — reads from GN Invisible socket
-            is_invisible = _get_gp_invisible(chain)
+            is_invisible = _get_gp_invisible(mod_props)
             vis_sub = row.row(align=True)
             vis_sub.active_default = not is_invisible
             op = vis_sub.operator(

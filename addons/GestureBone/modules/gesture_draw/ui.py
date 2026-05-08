@@ -136,10 +136,14 @@ class GESTUREBONE_PT_GestureDrawGestures(bpy.types.Panel):
         if mod_props is None:
             return
 
-        # ── Top row: global Edit Pose + Set GP + Bake All + Delete All ────────
+        # ── Top row: Pose↔GP toggle + Bake All + Delete All ─────────────────
+        on_arm = arm is not None and context.view_layer.objects.active == arm
         top_row = layout.row(align=True)
-        top_row.operator("gesturebone.edit_pose", text="Edit Pose", icon='ARMATURE_DATA')
-        top_row.operator("gesturebone.set_active_gp", text="", icon='GREASEPENCIL')
+        top_row.operator(
+            "gesturebone.toggle_pose_gp",
+            text="Edit Pose" if not on_arm else "",
+            icon='ARMATURE_DATA' if not on_arm else 'GP_ONLY_SELECTED',
+        )
         top_row.operator("gesturebone.bake_all_chains", text="Bake All", icon='FILE_REFRESH')
         top_row.operator("gesturebone.delete_all_baked_frames", text="", icon='TRASH')
 

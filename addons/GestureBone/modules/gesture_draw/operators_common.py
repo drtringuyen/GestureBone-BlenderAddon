@@ -1,6 +1,6 @@
 import bpy
 from bpy.props import IntProperty
-from .utils import _arm, _mod_props, _get_chain
+from .utils import _arm, _mod_props
 
 
 class GESTUREBONE_OT_AddChain(bpy.types.Operator):
@@ -39,53 +39,52 @@ class GESTUREBONE_OT_RemoveChain(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class GESTUREBONE_OT_SetActiveGP(bpy.types.Operator):
-    """Set the shared GP object as active in Object mode"""
-    bl_idname = "gesturebone.set_active_gp"
-    bl_label = "Set Active GP"
+class GESTUREBONE_OT_TogglePoseGP(bpy.types.Operator):
+    """Switch to GP object (Object mode) or back to armature (Pose mode)"""
+    bl_idname = "gesturebone.toggle_pose_gp"
+    bl_label = "Switch Active"
 
-    def execute(self, context):
-        mod_props = _mod_props(context)
-        gp_obj = mod_props.part_gp if mod_props else None
-        if not gp_obj:
-            self.report({'ERROR'}, "No GP object assigned")
-            return {'CANCELLED'}
-        if context.object and context.object.mode != 'OBJECT':
-            bpy.ops.object.mode_set(mode='OBJECT')
-        bpy.ops.object.select_all(action='DESELECT')
-        gp_obj.select_set(True)
-        context.view_layer.objects.active = gp_obj
-        return {'FINISHED'}
+    def _going_to_gp(self, context):
+        """True when the next action will switch TO the GP object."""
+        arm_obj = _arm(context)
+        return arm_obj is not None and context.view_layer.objects.active == arm_obj
 
-
-class GESTUREBONE_OT_EditPose(bpy.types.Operator):
-    """Select the active armature and enter Pose mode"""
-    bl_idname = "gesturebone.edit_pose"
-    bl_label = "Edit Pose"
+    def invoke(self, context, event):
+        return context.window_manager.invoke_confirm(self, event)
 
     def execute(self, context):
         arm_obj = _arm(context)
-        if not arm_obj:
-            self.report({'ERROR'}, "No armature active")
-            return {'CANCELLED'}
-        if context.object and context.object.mode != 'OBJECT':
-            bpy.ops.object.mode_set(mode='OBJECT')
-        bpy.ops.object.select_all(action='DESELECT')
-        arm_obj.select_set(True)
-        context.view_layer.objects.active = arm_obj
-        bpy.ops.object.mode_set(mode='POSE')
+        mod_props = _mod_props(context)
+        if self._going_to_gp(context):
+            gp_obj = mod_props.part_gp if mod_props else None
+            if not gp_obj:
+                self.report({'ERROR'}, "No GP object assigned")
+                return {'CANCELLED'}
+            if context.object and context.object.mode != 'OBJECT':
+                bpy.ops.object.mode_set(mode='OBJECT')
+            bpy.ops.object.select_all(action='DESELECT')
+            gp_obj.select_set(True)
+            context.view_layer.objects.active = gp_obj
+        else:
+            if not arm_obj:
+                self.report({'ERROR'}, "No armature active")
+                return {'CANCELLED'}
+            if context.object and context.object.mode != 'OBJECT':
+                bpy.ops.object.mode_set(mode='OBJECT')
+            bpy.ops.object.select_all(action='DESELECT')
+            arm_obj.select_set(True)
+            context.view_layer.objects.active = arm_obj
+            bpy.ops.object.mode_set(mode='POSE')
         return {'FINISHED'}
 
 
 def register():
     bpy.utils.register_class(GESTUREBONE_OT_AddChain)
     bpy.utils.register_class(GESTUREBONE_OT_RemoveChain)
-    bpy.utils.register_class(GESTUREBONE_OT_SetActiveGP)
-    bpy.utils.register_class(GESTUREBONE_OT_EditPose)
+    bpy.utils.register_class(GESTUREBONE_OT_TogglePoseGP)
 
 
 def unregister():
-    bpy.utils.unregister_class(GESTUREBONE_OT_EditPose)
-    bpy.utils.unregister_class(GESTUREBONE_OT_SetActiveGP)
+    bpy.utils.unregister_class(GESTUREBONE_OT_TogglePoseGP)
     bpy.utils.unregister_class(GESTUREBONE_OT_RemoveChain)
     bpy.utils.unregister_class(GESTUREBONE_OT_AddChain)

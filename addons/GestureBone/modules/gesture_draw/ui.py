@@ -141,7 +141,7 @@ class GESTUREBONE_PT_GestureDrawGestures(bpy.types.Panel):
         top_row = layout.row(align=True)
         top_row.operator(
             "gesturebone.toggle_pose_gp",
-            text="Edit Pose" if not on_arm else "",
+            text="Edit Pose" if not on_arm else "Draw Gesture",
             icon='ARMATURE_DATA' if not on_arm else 'GP_ONLY_SELECTED',
         )
         top_row.operator("gesturebone.bake_all_chains", text="Bake All", icon='FILE_REFRESH')

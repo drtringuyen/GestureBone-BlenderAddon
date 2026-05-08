@@ -56,7 +56,7 @@ class GESTUREBONE_OT_TogglePoseGP(bpy.types.Operator):
         arm_obj = _arm(context)
         mod_props = _mod_props(context)
         if self._going_to_gp(context):
-            gp_obj = mod_props.part_gp if mod_props else None
+            gp_obj = (mod_props.part_gp if mod_props else None) or context.scene.gesturebone_props.current_gp
             if not gp_obj:
                 self.report({'ERROR'}, "No GP object assigned")
                 return {'CANCELLED'}

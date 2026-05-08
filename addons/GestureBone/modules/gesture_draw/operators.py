@@ -144,6 +144,8 @@ class GESTUREBONE_OT_ToggleDrawing(bpy.types.Operator):
             if not gp_obj:
                 self.report({'ERROR'}, "No GP object set")
                 return {'CANCELLED'}
+            if gp_obj.hide_viewport:
+                gp_obj.hide_viewport = False
             for j, other in enumerate(mod_props.chains):
                 if j != self.chain_index and other.is_drawing:
                     if arm_obj and _constraints_exist(arm_obj, other):

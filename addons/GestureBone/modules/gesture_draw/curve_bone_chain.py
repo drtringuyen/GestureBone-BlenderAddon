@@ -3,8 +3,8 @@ from bpy.props import StringProperty, PointerProperty, BoolProperty
 
 
 def _bone_search(self, context, edit_text):
-    arm = self.part_armature
-    if arm and arm.type == 'ARMATURE':
+    arm = context.active_object if context and context.active_object and context.active_object.type == 'ARMATURE' else None
+    if arm:
         return [b.name for b in arm.data.bones if edit_text.lower() in b.name.lower()]
     return []
 
@@ -17,11 +17,6 @@ class GESTUREBONE_PG_CurveBoneChain(bpy.types.PropertyGroup):
         poll=lambda self, obj: obj.type == 'GREASEPENCIL',
     )
     part_material: PointerProperty(name="Material", type=bpy.types.Material)
-    part_armature: PointerProperty(
-        name="Armature",
-        type=bpy.types.Object,
-        poll=lambda self, obj: obj.type == 'ARMATURE',
-    )
     bone_0: StringProperty(name="1", search=_bone_search)
     bone_1: StringProperty(name="2", search=_bone_search)
     bone_2: StringProperty(name="3", search=_bone_search)
@@ -32,7 +27,6 @@ class GESTUREBONE_PG_CurveBoneChain(bpy.types.PropertyGroup):
     is_drawing: BoolProperty(name="Drawing", default=False)
     bones_expanded: BoolProperty(name="Bones", default=False)
 
-    # Saved before entering draw mode so we can restore it on toggle-off
     prev_active_object: StringProperty(default="")
     prev_mode: StringProperty(default="OBJECT")
 

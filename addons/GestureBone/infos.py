@@ -1,11 +1,10 @@
-"""Info panel operators: Build popup, Debug toggle, Console toggle, Clear console."""
+"""Info panel operators: Build popup, Reload, Debug toggle, Console toggle, Clear console."""
 import bpy
 import os
 import json
 
 
 def _read_build_info():
-    """Read build timestamp written by install.py."""
     build_file = os.path.join(os.path.dirname(__file__), "build_info.json")
     if os.path.exists(build_file):
         try:
@@ -39,6 +38,23 @@ class GESTUREBONE_OT_Build(bpy.types.Operator):
             layout.label(text="Not built yet - run install.py first", icon='ERROR')
 
     def execute(self, context):
+        return {'FINISHED'}
+
+
+class GESTUREBONE_OT_Reload(bpy.types.Operator):
+    """Reload GestureBone addon in Blender (disable → purge modules → enable).
+    Use this to apply in-place changes without running install.py."""
+    bl_idname = "gesturebone.reload"
+    bl_label = "Reload Addon"
+
+    def execute(self, context):
+        import sys
+        addon = "GestureBone"
+        bpy.ops.preferences.addon_disable(module=addon)
+        mods = [k for k in sys.modules if k == addon or k.startswith(addon + ".")]
+        for m in mods:
+            del sys.modules[m]
+        bpy.ops.preferences.addon_enable(module=addon)
         return {'FINISHED'}
 
 
@@ -87,7 +103,6 @@ class GESTUREBONE_OT_ClearConsole(bpy.types.Operator):
         return {'FINISHED'}
 
 
-
 class GESTUREBONE_OT_ToggleGestureDraw(bpy.types.Operator):
     """Toggle GestureDraw module on/off"""
     bl_idname = "gesturebone.toggle_gesture_draw"
@@ -98,8 +113,10 @@ class GESTUREBONE_OT_ToggleGestureDraw(bpy.types.Operator):
         module_manager.toggle("gesture_draw")
         return {'FINISHED'}
 
+
 def register():
     bpy.utils.register_class(GESTUREBONE_OT_Build)
+    bpy.utils.register_class(GESTUREBONE_OT_Reload)
     bpy.utils.register_class(GESTUREBONE_OT_ToggleDebug)
     bpy.utils.register_class(GESTUREBONE_OT_ToggleConsole)
     bpy.utils.register_class(GESTUREBONE_OT_ClearConsole)
@@ -111,4 +128,5 @@ def unregister():
     bpy.utils.unregister_class(GESTUREBONE_OT_ClearConsole)
     bpy.utils.unregister_class(GESTUREBONE_OT_ToggleConsole)
     bpy.utils.unregister_class(GESTUREBONE_OT_ToggleDebug)
+    bpy.utils.unregister_class(GESTUREBONE_OT_Reload)
     bpy.utils.unregister_class(GESTUREBONE_OT_Build)

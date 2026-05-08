@@ -11,13 +11,13 @@ class GESTUREBONEProperties(bpy.types.PropertyGroup):
     last_build_time: StringProperty(default="Never")
     addon_version: StringProperty(default="0.0.1")
 
-    main_armature: PointerProperty(
-        name="Main Armature",
+    current_armature: PointerProperty(
+        name="Current Armature",
         type=bpy.types.Object,
         poll=lambda self, obj: obj.type == 'ARMATURE',
     )
-    main_gp: PointerProperty(
-        name="Main GP",
+    current_gp: PointerProperty(
+        name="Current GP",
         type=bpy.types.Object,
         poll=lambda self, obj: obj.type == 'GREASEPENCIL',
     )

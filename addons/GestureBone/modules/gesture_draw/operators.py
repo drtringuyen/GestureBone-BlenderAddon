@@ -1,18 +1,28 @@
 import bpy
 from bpy.props import IntProperty
 
-# Bone constraint used by this module
 _CONSTRAINT_NAME = "GP_copy"
-
-# TODO: Verify this type string in Blender 5.1 via:
-#   [c.type for c in bpy.data.objects['YourArmature'].pose.bones[0].constraints]
-# or bpy.types.Constraint.bl_rna.properties['type'].enum_items.keys()
-# The "Geometry Attribute" constraint type may be named differently in the API.
 _CONSTRAINT_TYPE = "GEOMETRY_ATTRIBUTE"
 
 
+def _arm(context):
+    """Return the active armature, falling back to the last tracked one."""
+    obj = context.active_object
+    if obj and obj.type == 'ARMATURE':
+        return obj
+    fallback = context.scene.gesturebone_props.current_armature
+    return fallback if fallback and fallback.type == 'ARMATURE' else None
+
+
+def _mod_props(context):
+    """Return the gesture_draw props for the active armature, or None."""
+    obj = _arm(context)
+    return obj.gesturebone_gesture_draw_props if obj else None
+
+
 def _get_chain(context, index):
-    return context.scene.gesturebone_gesture_draw_props.chains[index]
+    props = _mod_props(context)
+    return props.chains[index] if props else None
 
 
 def _bone_names(chain):
@@ -27,15 +37,15 @@ class GESTUREBONE_OT_AddChain(bpy.types.Operator):
     bl_label = "Add Chain"
 
     def execute(self, context):
-        mod_props = context.scene.gesturebone_gesture_draw_props
+        mod_props = _mod_props(context)
+        if mod_props is None:
+            self.report({'ERROR'}, "Select an armature first")
+            return {'CANCELLED'}
         global_props = context.scene.gesturebone_props
         chain = mod_props.chains.add()
         chain.part_name = f"Chain {len(mod_props.chains)}"
-        # Pre-fill from globals so the user doesn't have to set them every time
-        if global_props.main_armature:
-            chain.part_armature = global_props.main_armature
-        if global_props.main_gp:
-            chain.part_gp = global_props.main_gp
+        if global_props.current_gp:
+            chain.part_gp = global_props.current_gp
         mod_props.active_chain_index = len(mod_props.chains) - 1
         return {'FINISHED'}
 
@@ -47,7 +57,9 @@ class GESTUREBONE_OT_RemoveChain(bpy.types.Operator):
     chain_index: IntProperty()
 
     def execute(self, context):
-        mod_props = context.scene.gesturebone_gesture_draw_props
+        mod_props = _mod_props(context)
+        if mod_props is None:
+            return {'CANCELLED'}
         idx = self.chain_index
         if 0 <= idx < len(mod_props.chains):
             mod_props.chains.remove(idx)
@@ -64,11 +76,13 @@ class GESTUREBONE_OT_CreateBoneConstraints(bpy.types.Operator):
     chain_index: IntProperty()
 
     def execute(self, context):
+        arm_obj = _arm(context)
         chain = _get_chain(context, self.chain_index)
-        arm_obj = chain.part_armature
-        gp_obj = chain.part_gp or context.scene.gesturebone_props.main_gp
-        if not arm_obj or not gp_obj:
-            self.report({'ERROR'}, "Armature or GP not set")
+        if arm_obj is None or chain is None:
+            return {'CANCELLED'}
+        gp_obj = chain.part_gp or context.scene.gesturebone_props.current_gp
+        if not gp_obj:
+            self.report({'ERROR'}, "GP object not set on this chain")
             return {'CANCELLED'}
 
         for i, bone_name in enumerate(_bone_names(chain)):
@@ -79,12 +93,10 @@ class GESTUREBONE_OT_CreateBoneConstraints(bpy.types.Operator):
                 self.report({'WARNING'}, f"Bone not found: {bone_name}")
                 continue
 
-            # Remove ALL Geometry Attribute constraints (enforce single GP_copy)
             for c in list(pose_bone.constraints):
                 if c.type == _CONSTRAINT_TYPE:
                     pose_bone.constraints.remove(c)
 
-            # Add constraint
             con = pose_bone.constraints.new(type=_CONSTRAINT_TYPE)
             con.name = _CONSTRAINT_NAME
             con.target = gp_obj
@@ -107,9 +119,9 @@ class GESTUREBONE_OT_DeleteBoneConstraints(bpy.types.Operator):
     chain_index: IntProperty()
 
     def execute(self, context):
+        arm_obj = _arm(context)
         chain = _get_chain(context, self.chain_index)
-        arm_obj = chain.part_armature
-        if not arm_obj:
+        if arm_obj is None or chain is None:
             return {'CANCELLED'}
 
         for bone_name in _bone_names(chain):
@@ -133,15 +145,14 @@ class GESTUREBONE_OT_ApplyAndKeyBoneConstraints(bpy.types.Operator):
     chain_index: IntProperty()
 
     def execute(self, context):
+        arm_obj = _arm(context)
         chain = _get_chain(context, self.chain_index)
-        arm_obj = chain.part_armature
-        if not arm_obj:
+        if arm_obj is None or chain is None:
             return {'CANCELLED'}
 
         prev_active = context.view_layer.objects.active
         prev_mode = context.object.mode if context.object else 'OBJECT'
 
-        # Switch to armature in pose mode
         if context.object and context.object.mode != 'OBJECT':
             bpy.ops.object.mode_set(mode='OBJECT')
         bpy.ops.object.select_all(action='DESELECT')
@@ -156,7 +167,6 @@ class GESTUREBONE_OT_ApplyAndKeyBoneConstraints(bpy.types.Operator):
             pose_bone = arm_obj.pose.bones.get(bone_name)
             if not pose_bone:
                 continue
-            # Bake visual/constraint-evaluated transform into matrix_basis, then key
             pose_bone.matrix_basis = arm_obj.convert_space(
                 pose_bone=pose_bone,
                 matrix=pose_bone.matrix,
@@ -167,7 +177,6 @@ class GESTUREBONE_OT_ApplyAndKeyBoneConstraints(bpy.types.Operator):
             pose_bone.keyframe_insert(data_path="rotation_quaternion", frame=frame)
             pose_bone.keyframe_insert(data_path="scale", frame=frame)
 
-        # Restore previous context
         bpy.ops.object.mode_set(mode='OBJECT')
         if prev_active:
             bpy.ops.object.select_all(action='DESELECT')
@@ -190,11 +199,13 @@ class GESTUREBONE_OT_ToggleDrawing(bpy.types.Operator):
     chain_index: IntProperty()
 
     def execute(self, context):
+        mod_props = _mod_props(context)
         chain = _get_chain(context, self.chain_index)
-        gp_obj = chain.part_gp or context.scene.gesturebone_props.main_gp
+        if mod_props is None or chain is None:
+            return {'CANCELLED'}
+        gp_obj = chain.part_gp or context.scene.gesturebone_props.current_gp
 
         if chain.is_drawing:
-            # Restore previous object + mode
             chain.is_drawing = False
             prev_obj = bpy.data.objects.get(chain.prev_active_object)
             if context.object and context.object.mode != 'OBJECT':
@@ -211,23 +222,18 @@ class GESTUREBONE_OT_ToggleDrawing(bpy.types.Operator):
             if not gp_obj:
                 self.report({'ERROR'}, "No GP object set")
                 return {'CANCELLED'}
-            # Turn off any other chain that is currently drawing
-            mod_props = context.scene.gesturebone_gesture_draw_props
             for j, other in enumerate(mod_props.chains):
                 if j != self.chain_index and other.is_drawing:
                     other.is_drawing = False
-            # Save current state
             if context.active_object:
                 chain.prev_active_object = context.active_object.name
                 chain.prev_mode = context.active_object.mode
-            # Enter GP draw mode
             if context.object and context.object.mode != 'OBJECT':
                 bpy.ops.object.mode_set(mode='OBJECT')
             bpy.ops.object.select_all(action='DESELECT')
             gp_obj.select_set(True)
             context.view_layer.objects.active = gp_obj
             bpy.ops.object.mode_set(mode='PAINT_GREASE_PENCIL')
-            # Set active material
             mat = chain.part_material
             if mat:
                 for i, slot in enumerate(gp_obj.material_slots):
@@ -239,17 +245,29 @@ class GESTUREBONE_OT_ToggleDrawing(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class GESTUREBONE_OT_ToggleGPVisibility(bpy.types.Operator):
+    """Toggle the viewport visibility of this chain's GP object"""
+    bl_idname = "gesturebone.toggle_gp_visibility"
+    bl_label = "Toggle GP Visibility"
+    chain_index: IntProperty()
+
+    def execute(self, context):
+        chain = _get_chain(context, self.chain_index)
+        if chain and chain.part_gp:
+            chain.part_gp.hide_viewport = not chain.part_gp.hide_viewport
+        return {'FINISHED'}
+
+
 class GESTUREBONE_OT_EditPose(bpy.types.Operator):
-    """Select the chain armature and enter Pose mode"""
+    """Select the active armature and enter Pose mode"""
     bl_idname = "gesturebone.edit_pose"
     bl_label = "Edit Pose"
     chain_index: IntProperty()
 
     def execute(self, context):
-        chain = _get_chain(context, self.chain_index)
-        arm_obj = chain.part_armature or context.scene.gesturebone_props.main_armature
+        arm_obj = _arm(context)
         if not arm_obj:
-            self.report({'ERROR'}, "No armature set")
+            self.report({'ERROR'}, "No armature active")
             return {'CANCELLED'}
         if context.object and context.object.mode != 'OBJECT':
             bpy.ops.object.mode_set(mode='OBJECT')
@@ -263,17 +281,20 @@ class GESTUREBONE_OT_EditPose(bpy.types.Operator):
 # ── Auto-reset is_drawing when user manually leaves GP draw mode ───────────────
 
 def _check_drawing_state(scene, depsgraph):
-    mod_props = scene.get("gesturebone_gesture_draw_props")
-    if mod_props is None:
-        return
-    mod_props = scene.gesturebone_gesture_draw_props
     active = bpy.context.view_layer.objects.active if bpy.context else None
     mode = bpy.context.mode if bpy.context else ''
-    for chain in mod_props.chains:
-        if chain.is_drawing:
-            gp_obj = chain.part_gp
-            if active != gp_obj or mode != 'PAINT_GREASE_PENCIL':
-                chain.is_drawing = False
+    for obj in scene.objects:
+        if obj.type != 'ARMATURE':
+            continue
+        try:
+            props = obj.gesturebone_gesture_draw_props
+        except AttributeError:
+            continue
+        for chain in props.chains:
+            if chain.is_drawing:
+                gp_obj = chain.part_gp
+                if active != gp_obj or mode != 'PAINT_GREASE_PENCIL':
+                    chain.is_drawing = False
 
 
 def register():
@@ -282,6 +303,7 @@ def register():
     bpy.utils.register_class(GESTUREBONE_OT_CreateBoneConstraints)
     bpy.utils.register_class(GESTUREBONE_OT_DeleteBoneConstraints)
     bpy.utils.register_class(GESTUREBONE_OT_ApplyAndKeyBoneConstraints)
+    bpy.utils.register_class(GESTUREBONE_OT_ToggleGPVisibility)
     bpy.utils.register_class(GESTUREBONE_OT_ToggleDrawing)
     bpy.utils.register_class(GESTUREBONE_OT_EditPose)
     bpy.app.handlers.depsgraph_update_post.append(_check_drawing_state)
@@ -292,6 +314,7 @@ def unregister():
         bpy.app.handlers.depsgraph_update_post.remove(_check_drawing_state)
     bpy.utils.unregister_class(GESTUREBONE_OT_EditPose)
     bpy.utils.unregister_class(GESTUREBONE_OT_ToggleDrawing)
+    bpy.utils.unregister_class(GESTUREBONE_OT_ToggleGPVisibility)
     bpy.utils.unregister_class(GESTUREBONE_OT_ApplyAndKeyBoneConstraints)
     bpy.utils.unregister_class(GESTUREBONE_OT_DeleteBoneConstraints)
     bpy.utils.unregister_class(GESTUREBONE_OT_CreateBoneConstraints)

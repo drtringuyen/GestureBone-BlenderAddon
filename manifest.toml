@@ -1,0 +1,16 @@
+schema_version = "1.0.0"
+
+id = "gesturebone"
+version = "0.0.1"
+name = "GestureBone"
+description = "Assist rigging & animation on bones aligned to curves or Grease Pencil"
+type = "add-on"
+
+authors = []
+
+blender_version_min = "4.0.0"
+
+url = ""
+license = ["GPL"]
+
+tags = ["Rigging"]

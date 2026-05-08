@@ -1,4 +1,5 @@
 import bpy
+from .utils import _find_gn_modifier, _find_socket_id, _constraints_are_muted, _constraints_exist
 
 
 def _chain_is_ready(chain):
@@ -12,6 +13,19 @@ def _active_arm(context):
         return obj
     fallback = context.scene.gesturebone_props.current_armature
     return fallback if fallback and fallback.type == 'ARMATURE' else None
+
+
+def _get_gp_invisible(chain):
+    """Return True if the GP Invisible socket is ON (i.e. geometry is hidden)."""
+    if not chain.part_gp:
+        return False
+    mod = _find_gn_modifier(chain.part_gp)
+    if not mod:
+        return False
+    sid = _find_socket_id(mod, "Invisible")
+    if sid is None:
+        return False
+    return bool(mod.get(sid, False))
 
 
 class GESTUREBONE_PT_GestureDraw(bpy.types.Panel):
@@ -83,7 +97,6 @@ class GESTUREBONE_PT_GestureDrawBinding(bpy.types.Panel):
 
             # ── Body (only when expanded) ───────────────────────────────────
             if chain.bones_expanded:
-                # Row: "Bindings" label + GP + material
                 bind_row = box.row(align=True)
                 bind_row.label(text="Bindings")
                 gp_sub = bind_row.row(align=True)
@@ -91,7 +104,6 @@ class GESTUREBONE_PT_GestureDrawBinding(bpy.types.Panel):
                 gp_sub.prop(chain, "part_gp", text="", icon='GREASEPENCIL')
                 bind_row.prop(chain, "part_material", text="", icon='MATERIAL')
 
-                # Bone rows 1–5
                 col = box.column(align=True)
                 for j, attr in enumerate(["bone_0", "bone_1", "bone_2", "bone_3", "bone_4"]):
                     col.prop(chain, attr, text=f"Bone {j + 1}")
@@ -122,24 +134,31 @@ class GESTUREBONE_PT_GestureDrawGestures(bpy.types.Panel):
         if mod_props is None:
             return
 
+        # ── Top row: global Edit Pose + Bake All + Delete All ───────────────
+        top_row = layout.row(align=True)
+        top_row.operator("gesturebone.edit_pose", text="Edit Pose", icon='ARMATURE_DATA')
+        top_row.operator("gesturebone.bake_all_chains", text="Bake All", icon='FILE_REFRESH')
+        top_row.operator("gesturebone.delete_all_baked_frames", text="", icon='TRASH')
+
         if not mod_props.chains:
             layout.label(text="No chains — add in Binding", icon='INFO')
             return
 
+        # ── Per-chain rows ───────────────────────────────────────────────────
         for i, chain in enumerate(mod_props.chains):
             row = layout.row(align=True)
 
-            # Visibility eye icon (1 unit)
-            is_visible = bool(chain.part_gp and not chain.part_gp.hide_viewport)
+            # Visibility eye — reads from GN Invisible socket
+            is_invisible = _get_gp_invisible(chain)
             vis_sub = row.row(align=True)
-            vis_sub.active_default = is_visible
+            vis_sub.active_default = not is_invisible
             op = vis_sub.operator(
                 "gesturebone.toggle_gp_visibility", text="",
-                icon='HIDE_OFF' if is_visible else 'HIDE_ON',
+                icon='HIDE_ON' if is_invisible else 'HIDE_OFF',
             )
             op.chain_index = i
 
-            # Wide draw toggle (scale_x=4 → takes ~4x a normal icon button)
+            # Wide draw toggle
             draw_sub = row.row(align=True)
             draw_sub.scale_x = 4.0
             draw_sub.active_default = chain.is_drawing
@@ -150,19 +169,21 @@ class GESTUREBONE_PT_GestureDrawGestures(bpy.types.Panel):
             )
             op.chain_index = i
 
-            # Apply+key | bind | edit pose (1 unit each)
-            op = row.operator("gesturebone.apply_and_key_bone_constraints", text="", icon='KEY_HLT')
+            # Delete current frame keys + strokes, then restore last reference pose
+            op = row.operator("gesturebone.delete_baked_frames", text="", icon='KEY_DEHLT')
             op.chain_index = i
 
-            bind_sub = row.row(align=True)
-            bind_sub.active_default = chain.is_bound
-            if chain.is_bound:
-                op = bind_sub.operator("gesturebone.delete_bone_constraints", text="", icon='LINKED')
+
+            # Constraint toggle: active (unmuted) / muted / unbound
+            con_sub = row.row(align=True)
+            if chain.is_bound and arm and _constraints_exist(arm, chain):
+                is_active = not _constraints_are_muted(arm, chain)
+                con_sub.active_default = is_active
+                icon = 'LINKED' if is_active else 'UNLINKED'
             else:
-                op = bind_sub.operator("gesturebone.create_bone_constraints", text="", icon='UNLINKED')
-            op.chain_index = i
-
-            op = row.operator("gesturebone.edit_pose", text="", icon='BONE_DATA')
+                con_sub.active_default = False
+                icon = 'UNLINKED'
+            op = con_sub.operator("gesturebone.toggle_constraint_active", text="", icon=icon)
             op.chain_index = i
 
 

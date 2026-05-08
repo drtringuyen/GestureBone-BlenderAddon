@@ -1,5 +1,5 @@
 import bpy
-from bpy.props import StringProperty, PointerProperty, BoolProperty
+from bpy.props import StringProperty, PointerProperty, BoolProperty, IntProperty
 
 
 def _bone_search(self, context, edit_text):
@@ -29,6 +29,10 @@ class GESTUREBONE_PG_CurveBoneChain(bpy.types.PropertyGroup):
 
     prev_active_object: StringProperty(default="")
     prev_mode: StringProperty(default="OBJECT")
+
+    last_baked_frame: IntProperty(name="Last Baked Frame", default=-1)
+    stroke_count_cache: IntProperty(name="Stroke Count Cache", default=0)
+    drawing_frame: IntProperty(name="Drawing Frame", default=-1)
 
 
 def register():

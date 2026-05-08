@@ -1,0 +1,70 @@
+import bpy
+from bpy.props import IntProperty
+from .utils import _arm, _mod_props
+
+
+class GESTUREBONE_OT_AddChain(bpy.types.Operator):
+    """Add a new CurveBoneChain entry"""
+    bl_idname = "gesturebone.add_chain"
+    bl_label = "Add Chain"
+
+    def execute(self, context):
+        mod_props = _mod_props(context)
+        if mod_props is None:
+            self.report({'ERROR'}, "Select an armature first")
+            return {'CANCELLED'}
+        global_props = context.scene.gesturebone_props
+        chain = mod_props.chains.add()
+        chain.part_name = f"Chain {len(mod_props.chains)}"
+        if global_props.current_gp:
+            chain.part_gp = global_props.current_gp
+        mod_props.active_chain_index = len(mod_props.chains) - 1
+        return {'FINISHED'}
+
+
+class GESTUREBONE_OT_RemoveChain(bpy.types.Operator):
+    """Remove the selected CurveBoneChain entry"""
+    bl_idname = "gesturebone.remove_chain"
+    bl_label = "Remove Chain"
+    chain_index: IntProperty()
+
+    def execute(self, context):
+        mod_props = _mod_props(context)
+        if mod_props is None:
+            return {'CANCELLED'}
+        idx = self.chain_index
+        if 0 <= idx < len(mod_props.chains):
+            mod_props.chains.remove(idx)
+            mod_props.active_chain_index = max(0, idx - 1)
+        return {'FINISHED'}
+
+
+class GESTUREBONE_OT_EditPose(bpy.types.Operator):
+    """Select the active armature and enter Pose mode"""
+    bl_idname = "gesturebone.edit_pose"
+    bl_label = "Edit Pose"
+
+    def execute(self, context):
+        arm_obj = _arm(context)
+        if not arm_obj:
+            self.report({'ERROR'}, "No armature active")
+            return {'CANCELLED'}
+        if context.object and context.object.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+        bpy.ops.object.select_all(action='DESELECT')
+        arm_obj.select_set(True)
+        context.view_layer.objects.active = arm_obj
+        bpy.ops.object.mode_set(mode='POSE')
+        return {'FINISHED'}
+
+
+def register():
+    bpy.utils.register_class(GESTUREBONE_OT_AddChain)
+    bpy.utils.register_class(GESTUREBONE_OT_RemoveChain)
+    bpy.utils.register_class(GESTUREBONE_OT_EditPose)
+
+
+def unregister():
+    bpy.utils.unregister_class(GESTUREBONE_OT_EditPose)
+    bpy.utils.unregister_class(GESTUREBONE_OT_RemoveChain)
+    bpy.utils.unregister_class(GESTUREBONE_OT_AddChain)

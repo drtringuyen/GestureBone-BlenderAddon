@@ -129,13 +129,13 @@ class GESTUREBONE_PT_GestureDrawGestures(bpy.types.Panel):
         for i, chain in enumerate(mod_props.chains):
             row = layout.row(align=True)
 
-            # Visibility dot (1 unit)
+            # Visibility eye icon (1 unit)
             is_visible = bool(chain.part_gp and not chain.part_gp.hide_viewport)
             vis_sub = row.row(align=True)
             vis_sub.active_default = is_visible
             op = vis_sub.operator(
                 "gesturebone.toggle_gp_visibility", text="",
-                icon='LAYER_ACTIVE' if is_visible else 'LAYER_USED',
+                icon='HIDE_OFF' if is_visible else 'HIDE_ON',
             )
             op.chain_index = i
 

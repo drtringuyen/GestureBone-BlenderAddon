@@ -49,9 +49,6 @@ class GESTUREBONE_OT_TogglePoseGP(bpy.types.Operator):
         arm_obj = _arm(context)
         return arm_obj is not None and context.view_layer.objects.active == arm_obj
 
-    def invoke(self, context, event):
-        return context.window_manager.invoke_confirm(self, event)
-
     def execute(self, context):
         arm_obj = _arm(context)
         mod_props = _mod_props(context)

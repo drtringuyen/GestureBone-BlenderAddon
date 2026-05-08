@@ -69,7 +69,6 @@ class GESTUREBONE_PT_GestureDrawBinding(bpy.types.Panel):
             return
 
         gp_row = layout.row(align=True)
-        gp_row.alert = mod_props.part_gp is None
         gp_row.prop(mod_props, "part_gp", text="GP", icon='GREASEPENCIL')
 
         row = layout.row(align=True)
@@ -141,8 +140,8 @@ class GESTUREBONE_PT_GestureDrawGestures(bpy.types.Panel):
         top_row = layout.row(align=True)
         top_row.operator(
             "gesturebone.toggle_pose_gp",
-            text="Edit Pose" if not on_arm else "Draw Gesture",
-            icon='ARMATURE_DATA' if not on_arm else 'GP_ONLY_SELECTED',
+            text="Edit Pose" if not on_arm else "Frame Gesture",
+            icon='ARMATURE_DATA' if not on_arm else 'GP_SELECT_BETWEEN_STROKES',
         )
         top_row.operator("gesturebone.bake_all_chains", text="Bake All", icon='FILE_REFRESH')
         top_row.operator("gesturebone.delete_all_baked_frames", text="", icon='TRASH')

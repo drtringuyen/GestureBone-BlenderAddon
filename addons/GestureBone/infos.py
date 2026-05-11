@@ -114,6 +114,17 @@ class GESTUREBONE_OT_ToggleGestureDraw(bpy.types.Operator):
         return {'FINISHED'}
 
 
+
+class GESTUREBONE_OT_ToggleMeshSpritesheet(bpy.types.Operator):
+    """Toggle MeshSpritesheet module on/off"""
+    bl_idname = "gesturebone.toggle_mesh_spritesheet"
+    bl_label = "MeshSpritesheet"
+
+    def execute(self, context):
+        from . import module_manager
+        module_manager.toggle("mesh_spritesheet")
+        return {'FINISHED'}
+
 def register():
     bpy.utils.register_class(GESTUREBONE_OT_Build)
     bpy.utils.register_class(GESTUREBONE_OT_Reload)
@@ -121,9 +132,11 @@ def register():
     bpy.utils.register_class(GESTUREBONE_OT_ToggleConsole)
     bpy.utils.register_class(GESTUREBONE_OT_ClearConsole)
     bpy.utils.register_class(GESTUREBONE_OT_ToggleGestureDraw)
+    bpy.utils.register_class(GESTUREBONE_OT_ToggleMeshSpritesheet)
 
 
 def unregister():
+    bpy.utils.unregister_class(GESTUREBONE_OT_ToggleMeshSpritesheet)
     bpy.utils.unregister_class(GESTUREBONE_OT_ToggleGestureDraw)
     bpy.utils.unregister_class(GESTUREBONE_OT_ClearConsole)
     bpy.utils.unregister_class(GESTUREBONE_OT_ToggleConsole)

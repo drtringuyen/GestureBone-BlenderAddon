@@ -1,6 +1,6 @@
 import bpy
 from bpy.props import IntProperty
-from .utils import _arm, _mod_props, _find_gn_modifier, _find_socket_id
+from .utils import _arm, _mod_props, _find_gn_modifier, _find_socket_id, _ensure_gp_object, _ensure_chain_objects, _ensure_gp_layer, _sort_gp_layers, _refresh_bone_lists, _ensure_gp_animation
 
 
 class GESTUREBONE_OT_AddChain(bpy.types.Operator):
@@ -87,13 +87,57 @@ class GESTUREBONE_OT_TogglePoseGP(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class GESTUREBONE_OT_RefreshChain(bpy.types.Operator):
+    """Resize bone lists, auto-fill from armature, and ensure splines/layer exist"""
+    bl_idname = "gesturebone.refresh_chain"
+    bl_label = "Refresh Chain"
+    chain_index: IntProperty()
+
+    def execute(self, context):
+        arm = _arm(context)
+        mod_props = _mod_props(context)
+        if mod_props is None or not (0 <= self.chain_index < len(mod_props.chains)):
+            return {'CANCELLED'}
+        chain = mod_props.chains[self.chain_index]
+        _ensure_gp_object(arm, mod_props, context)
+        _ensure_chain_objects(arm, chain, context)
+        _ensure_gp_layer(arm, chain)
+        _refresh_bone_lists(chain)
+        return {'FINISHED'}
+
+
+class GESTUREBONE_OT_RefreshAllChains(bpy.types.Operator):
+    """Ensure GP object, splines, layers exist for all chains and fix layer order"""
+    bl_idname = "gesturebone.refresh_all_chains"
+    bl_label = "Refresh All Chains"
+
+    def execute(self, context):
+        arm = _arm(context)
+        mod_props = _mod_props(context)
+        if mod_props is None:
+            self.report({'ERROR'}, "Select an armature first")
+            return {'CANCELLED'}
+        _ensure_gp_object(arm, mod_props, context)
+        for chain in mod_props.chains:
+            _ensure_chain_objects(arm, chain, context)
+            _ensure_gp_layer(arm, chain)
+            _refresh_bone_lists(chain)
+        _sort_gp_layers(mod_props, mod_props.chains)
+        _ensure_gp_animation(mod_props, mod_props.chains)
+        return {'FINISHED'}
+
+
 def register():
     bpy.utils.register_class(GESTUREBONE_OT_AddChain)
     bpy.utils.register_class(GESTUREBONE_OT_RemoveChain)
     bpy.utils.register_class(GESTUREBONE_OT_TogglePoseGP)
+    bpy.utils.register_class(GESTUREBONE_OT_RefreshChain)
+    bpy.utils.register_class(GESTUREBONE_OT_RefreshAllChains)
 
 
 def unregister():
+    bpy.utils.unregister_class(GESTUREBONE_OT_RefreshAllChains)
+    bpy.utils.unregister_class(GESTUREBONE_OT_RefreshChain)
     bpy.utils.unregister_class(GESTUREBONE_OT_TogglePoseGP)
     bpy.utils.unregister_class(GESTUREBONE_OT_RemoveChain)
     bpy.utils.unregister_class(GESTUREBONE_OT_AddChain)

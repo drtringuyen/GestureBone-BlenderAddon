@@ -3,7 +3,7 @@ from .utils import _find_gn_modifier, _find_socket_id, _constraints_are_muted, _
 
 
 def _chain_is_ready(mod_props, chain):
-    has_bone = any([chain.bone_0, chain.bone_1, chain.bone_2, chain.bone_3, chain.bone_4])
+    has_bone = any(entry.bone for entry in chain.part_control_bones)
     return mod_props.part_gp is not None and chain.is_bound and has_bone
 
 
@@ -75,6 +75,7 @@ class GESTUREBONE_PT_GestureDrawBinding(bpy.types.Panel):
         row.operator("gesturebone.add_chain", icon='ADD', text="Add Chain")
         if mod_props.chains:
             row.operator("gesturebone.remove_chain", icon='REMOVE', text="").chain_index = len(mod_props.chains) - 1
+        row.operator("gesturebone.refresh_all_chains", icon='FILE_REFRESH', text="")
 
         for i, chain in enumerate(mod_props.chains):
             ready = _chain_is_ready(mod_props, chain)
@@ -101,13 +102,56 @@ class GESTUREBONE_PT_GestureDrawBinding(bpy.types.Panel):
 
             # ── Body (only when expanded) ───────────────────────────────────
             if chain.bones_expanded:
-                bind_row = box.row(align=True)
-                bind_row.label(text="Bindings")
-                bind_row.prop(chain, "part_material", text="", icon='MATERIAL')
+                # Layer + Material row
+                lm_row = box.row(align=True)
+                lm_row.prop(chain, "part_layer", text="", icon='RENDERLAYERS')
+                lm_row.prop(chain, "part_material", text="", icon='MATERIAL')
 
                 col = box.column(align=True)
-                for j, attr in enumerate(["bone_0", "bone_1", "bone_2", "bone_3", "bone_4"]):
-                    col.prop(chain, attr, text=f"Bone {j + 1}")
+
+                # Gesture spline + control mode enum on same row
+                gesture_row = col.row(align=True)
+                gesture_row.prop(chain, "part_gesture_spline", text="Gesture Spline", icon='CURVE_BEZCURVE')
+                pt_sub = gesture_row.row(align=True)
+                pt_sub.scale_x = 0.65
+                pt_sub.prop(chain, "part_control_mode", text="")
+
+                # Control bones collapsible header + refresh button
+                ctrl_header = col.row(align=True)
+                ctrl_header.prop(
+                    chain, "control_bones_expanded",
+                    text="Control Bones",
+                    icon='TRIA_DOWN' if chain.control_bones_expanded else 'TRIA_RIGHT',
+                    emboss=False,
+                )
+                op = ctrl_header.operator("gesturebone.refresh_chain", text="", icon='FILE_REFRESH')
+                op.chain_index = i
+                if chain.control_bones_expanded:
+                    for j, entry in enumerate(chain.part_control_bones):
+                        col.prop(entry, "bone", text=f"  Bone {j + 1}")
+
+                col.separator(factor=0.5)
+
+                # Plotting spline + plotting mode enum on same row
+                plotting_row = col.row(align=True)
+                plotting_row.prop(chain, "part_plotting_spline", text="Plotting Spline", icon='CURVE_DATA')
+                pp_sub = plotting_row.row(align=True)
+                pp_sub.scale_x = 0.65
+                pp_sub.prop(chain, "part_plotting_mode", text="")
+
+                # Plotting bones collapsible header + refresh button
+                plot_header = col.row(align=True)
+                plot_header.prop(
+                    chain, "plotting_bones_expanded",
+                    text="Plotting Bones",
+                    icon='TRIA_DOWN' if chain.plotting_bones_expanded else 'TRIA_RIGHT',
+                    emboss=False,
+                )
+                op = plot_header.operator("gesturebone.refresh_chain", text="", icon='FILE_REFRESH')
+                op.chain_index = i
+                if chain.plotting_bones_expanded:
+                    for j, entry in enumerate(chain.part_plotting_bones):
+                        col.prop(entry, "bone", text=f"  Bone {j + 1}")
 
 
 class GESTUREBONE_PT_GestureDrawGestures(bpy.types.Panel):
@@ -179,7 +223,6 @@ class GESTUREBONE_PT_GestureDrawGestures(bpy.types.Panel):
             op = row.operator("gesturebone.delete_baked_frames", text="", icon='KEY_DEHLT')
             op.chain_index = i
 
-
             # Constraint toggle: active (unmuted) / muted / unbound
             con_sub = row.row(align=True)
             if chain.is_bound and arm and _constraints_exist(arm, chain):
@@ -193,13 +236,84 @@ class GESTUREBONE_PT_GestureDrawGestures(bpy.types.Panel):
             op.chain_index = i
 
 
+_CHAIN_FIELDS = [
+    ("part_name",                "Name"),
+    ("part_layer",               "Layer"),
+    ("part_material",            "Material"),
+    ("part_gesture_spline",      "Gesture Spline"),
+    ("part_control_mode",        "Control Mode"),
+    ("part_control_point_count", "Control Count (derived)"),
+    ("part_plotting_spline",     "Plotting Spline"),
+    ("part_plotting_mode",       "Plotting Mode"),
+    ("part_plotting_point_count","Plotting Count (derived)"),
+    ("is_bound",                 "Is Bound"),
+    ("is_drawing",               "Is Drawing"),
+    ("bones_expanded",           "Bones Expanded"),
+    ("control_bones_expanded",   "Ctrl Bones Expanded"),
+    ("plotting_bones_expanded",  "Plot Bones Expanded"),
+    ("prev_active_object",       "Prev Active Object"),
+    ("prev_mode",                "Prev Mode"),
+    ("last_baked_frame",         "Last Baked Frame"),
+    ("stroke_count_cache",       "Stroke Count Cache"),
+    ("drawing_frame",            "Drawing Frame"),
+]
+
+
+class GESTUREBONE_PT_GestureDrawDebug(bpy.types.Panel):
+    """Live view of all CurveBoneChain properties — visible only in debug mode"""
+    bl_label = "Debug: Chain Props"
+    bl_idname = "GESTUREBONE_PT_gesture_draw_debug"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = "GestureBone"
+    bl_parent_id = "GESTUREBONE_PT_main"
+    bl_options = {'DEFAULT_CLOSED'}
+    bl_order = -1
+
+    @classmethod
+    def poll(cls, context):
+        return getattr(context.scene.gesturebone_props, 'debug_mode', False)
+
+    def draw(self, context):
+        layout = self.layout
+        arm = _active_arm(context)
+
+        if arm is None:
+            layout.label(text="No armature", icon='ERROR')
+            return
+
+        mod_props = getattr(arm, 'gesturebone_gesture_draw_props', None)
+        if mod_props is None:
+            layout.label(text="Props not initialized", icon='ERROR')
+            return
+
+        if not mod_props.chains:
+            layout.label(text="No chains", icon='INFO')
+            return
+
+        for i, chain in enumerate(mod_props.chains):
+            box = layout.box()
+            box.label(text=f"[{i}]  {chain.part_name or '(unnamed)'}", icon='SEQUENCE_COLOR_0' if chain.is_drawing else 'LAYER_USED')
+            col = box.column(align=True)
+            for attr, label in _CHAIN_FIELDS:
+                col.prop(chain, attr, text=label)
+            col.label(text=f"Control Bones ({len(chain.part_control_bones)})")
+            for j, entry in enumerate(chain.part_control_bones):
+                col.prop(entry, "bone", text=f"  [{j}]")
+            col.label(text=f"Plotting Bones ({len(chain.part_plotting_bones)})")
+            for j, entry in enumerate(chain.part_plotting_bones):
+                col.prop(entry, "bone", text=f"  [{j}]")
+
+
 def register():
     bpy.utils.register_class(GESTUREBONE_PT_GestureDraw)
     bpy.utils.register_class(GESTUREBONE_PT_GestureDrawBinding)
     bpy.utils.register_class(GESTUREBONE_PT_GestureDrawGestures)
+    bpy.utils.register_class(GESTUREBONE_PT_GestureDrawDebug)
 
 
 def unregister():
+    bpy.utils.unregister_class(GESTUREBONE_PT_GestureDrawDebug)
     bpy.utils.unregister_class(GESTUREBONE_PT_GestureDrawGestures)
     bpy.utils.unregister_class(GESTUREBONE_PT_GestureDrawBinding)
     bpy.utils.unregister_class(GESTUREBONE_PT_GestureDraw)

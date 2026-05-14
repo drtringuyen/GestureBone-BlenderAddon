@@ -28,6 +28,12 @@ PLOTTING_MODE_COUNT = {
     'LIN_10': 20,
 }
 
+# Default geometry node group name per spline type — change here to remap globally
+SPLINE_GEONODE_DEFAULTS = {
+    'gesture': 'Snap_to_bones',
+    'plotting': 'Curve_Armature_Symetry_5',
+}
+
 
 # ── Search callbacks ───────────────────────────────────────────────────────────
 

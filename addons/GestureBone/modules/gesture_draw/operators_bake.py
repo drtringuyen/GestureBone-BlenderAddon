@@ -2,7 +2,7 @@ import bpy
 from bpy.props import IntProperty
 from .utils import (
     _arm, _mod_props, _get_chain, _bone_names,
-    _get_fcurve_store, _apply_and_key_data, _count_strokes_at_frame,
+    _get_fcurve_store, _apply_and_key_data,
     _mute_constraints, _unmute_constraints, _frame_strokes,
     _remove_matching_strokes,
 )
@@ -189,54 +189,13 @@ class GESTUREBONE_OT_DeleteAllBakedFrames(bpy.types.Operator):
         return {'FINISHED'}
 
 
-# ── Depsgraph handler: auto-reset is_drawing + auto-bake on new strokes ────────
-
-def _check_drawing_state(scene, depsgraph):
-    ctx = bpy.context
-    active = ctx.view_layer.objects.active if ctx else None
-    mode = ctx.mode if ctx else ''
-    for obj in scene.objects:
-        if obj.type != 'ARMATURE':
-            continue
-        try:
-            props = obj.gesturebone_gesture_draw_props
-        except AttributeError:
-            continue
-        gp_obj = props.part_gp
-        for chain in props.chains:
-            if not chain.is_drawing:
-                continue
-            if active != gp_obj or mode != 'PAINT_GREASE_PENCIL':
-                # Unexpected exit: bake whatever pose is live before losing constraint state
-                _apply_and_key_data(obj, chain, scene.frame_current, depsgraph)
-                _mute_constraints(obj, chain)
-                chain.is_drawing = False
-                chain.drawing_frame = -1
-            elif chain.drawing_frame >= 0 and scene.frame_current != chain.drawing_frame:
-                # User scrubbed or played the timeline: bake the drawing frame then exit
-                _apply_and_key_data(obj, chain, chain.drawing_frame, depsgraph)
-                _mute_constraints(obj, chain)
-                chain.is_drawing = False
-                chain.drawing_frame = -1
-            else:
-                frame_num = scene.frame_current
-                new_count = _count_strokes_at_frame(chain, gp_obj, frame_num)
-                if new_count > chain.stroke_count_cache:
-                    # New stroke drawn on the drawing frame
-                    chain.stroke_count_cache = new_count
-                    _apply_and_key_data(obj, chain, frame_num, depsgraph)
-
-
 def register():
     bpy.utils.register_class(GESTUREBONE_OT_DeleteBakedFrames)
     bpy.utils.register_class(GESTUREBONE_OT_BakeAllChains)
     bpy.utils.register_class(GESTUREBONE_OT_DeleteAllBakedFrames)
-    bpy.app.handlers.depsgraph_update_post.append(_check_drawing_state)
 
 
 def unregister():
-    if _check_drawing_state in bpy.app.handlers.depsgraph_update_post:
-        bpy.app.handlers.depsgraph_update_post.remove(_check_drawing_state)
     bpy.utils.unregister_class(GESTUREBONE_OT_DeleteAllBakedFrames)
     bpy.utils.unregister_class(GESTUREBONE_OT_BakeAllChains)
     bpy.utils.unregister_class(GESTUREBONE_OT_DeleteBakedFrames)

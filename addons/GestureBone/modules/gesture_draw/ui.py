@@ -219,6 +219,14 @@ class GESTUREBONE_PT_GestureDrawGestures(bpy.types.Panel):
             )
             op.chain_index = i
 
+            # Apply current GP spline pose to bone keyframe
+            op = row.operator("gesturebone.apply_to_bone", text="", icon='ACTION')
+            op.chain_index = i
+
+            # Select gesture spline and ensure Snap_to_bones GN modifier
+            op = row.operator("gesturebone.load_from_bone", text="", icon='EMPTY_SINGLE_ARROW')
+            op.chain_index = i
+
             # Delete current frame keys + strokes, then restore last reference pose
             op = row.operator("gesturebone.delete_baked_frames", text="", icon='KEY_DEHLT')
             op.chain_index = i
@@ -293,7 +301,7 @@ class GESTUREBONE_PT_GestureDrawDebug(bpy.types.Panel):
 
         for i, chain in enumerate(mod_props.chains):
             box = layout.box()
-            box.label(text=f"[{i}]  {chain.part_name or '(unnamed)'}", icon='SEQUENCE_COLOR_0' if chain.is_drawing else 'LAYER_USED')
+            box.label(text=f"[{i}]  {chain.part_name or '(unnamed)'}", icon='LAYER_ACTIVE' if chain.is_drawing else 'LAYER_USED')
             col = box.column(align=True)
             for attr, label in _CHAIN_FIELDS:
                 col.prop(chain, attr, text=label)

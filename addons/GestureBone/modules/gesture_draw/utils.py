@@ -2,8 +2,8 @@ from .utils_context import _arm, _mod_props, _get_chain, _bone_names
 from .utils_chain import (
     _resize_collection, _find_arm_collection,
     _ensure_gp_object, _ensure_child_collection, _move_object_to_collection,
-    _ensure_chain_objects, _ensure_gp_layer, _sort_gp_layers,
-    _ensure_gp_animation, _refresh_bone_lists,
+    _ensure_chain_objects, _ensure_gp_layer, _sort_gp_layers, _sync_gp_layers,
+    _cleanup_orphan_splines, _ensure_gp_animation, _refresh_bone_lists,
 )
 from .utils_constraints import (
     _CONSTRAINT_NAME, _CONSTRAINT_TYPE,
@@ -24,8 +24,8 @@ __all__ = [
     '_arm', '_mod_props', '_get_chain', '_bone_names',
     '_resize_collection', '_find_arm_collection',
     '_ensure_gp_object', '_ensure_child_collection', '_move_object_to_collection',
-    '_ensure_chain_objects', '_ensure_gp_layer', '_sort_gp_layers',
-    '_ensure_gp_animation', '_refresh_bone_lists',
+    '_ensure_chain_objects', '_ensure_gp_layer', '_sort_gp_layers', '_sync_gp_layers',
+    '_cleanup_orphan_splines', '_ensure_gp_animation', '_refresh_bone_lists',
     '_CONSTRAINT_NAME', '_CONSTRAINT_TYPE',
     '_mute_constraints', '_unmute_constraints',
     '_constraints_exist', '_constraints_are_muted',

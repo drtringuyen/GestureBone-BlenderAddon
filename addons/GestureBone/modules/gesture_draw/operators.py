@@ -52,6 +52,9 @@ class GESTUREBONE_OT_CreateBoneConstraints(bpy.types.Operator):
             con.attribute_name = "instance_transform"
             con.data_type = 'FLOAT4X4'
             con.domain = 'INSTANCE'
+            # GN modifier processes layers from visual top → chains[0] gets slots 0-4.
+            # _sort_gp_layers keeps chains[0] at data[-1] (visual top), so chain_index
+            # matches the GN processing order.
             con.sample_index = i + self.chain_index * 5
             con.mix_mode = 'REPLACE'
             con.influence = 1.0
@@ -397,6 +400,58 @@ class GESTUREBONE_OT_ToggleGPVisibility(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class GESTUREBONE_OT_DebugConstraintState(bpy.types.Operator):
+    """Print chain order, GP layer data order, and constraint sample_indices to the console"""
+    bl_idname = "gesturebone.debug_constraint_state"
+    bl_label = "Debug Constraint State"
+
+    def execute(self, context):
+        from .utils import _arm, _mod_props
+        arm_obj = _arm(context)
+        mod_props = _mod_props(context)
+        if arm_obj is None or mod_props is None:
+            self.report({'ERROR'}, "No armature")
+            return {'CANCELLED'}
+
+        gp_obj = mod_props.part_gp
+        print("\n══════════ GestureBone Debug ══════════")
+        print(f"Armature: {arm_obj.name}")
+
+        if gp_obj:
+            print(f"\nGP object: {gp_obj.name}")
+            print("  GP layers (data order, [0] = first processed by GN modifier):")
+            for i, l in enumerate(gp_obj.data.layers):
+                active_tag = " ← ACTIVE" if l == gp_obj.data.layers.active else ""
+                print(f"    data[{i}]  '{l.name}'{active_tag}")
+        else:
+            print("  No GP object assigned")
+
+        print(f"\nChains (mod_props.chains order):")
+        for ci, chain in enumerate(mod_props.chains):
+            layer_data_idx = None
+            if gp_obj:
+                layer_data_idx = next(
+                    (idx for idx, l in enumerate(gp_obj.data.layers) if l.name == chain.part_layer),
+                    None,
+                )
+            expected_base = layer_data_idx * 5 if layer_data_idx is not None else f"?? (layer '{chain.part_layer}' not found)"
+            print(f"  chains[{ci}]  name='{chain.part_name}'  layer='{chain.part_layer}'  "
+                  f"layer_data_idx={layer_data_idx}  expected sample_index base={expected_base}")
+
+            for entry in chain.part_control_bones:
+                if not entry.bone:
+                    continue
+                pb = arm_obj.pose.bones.get(entry.bone)
+                if pb:
+                    for c in pb.constraints:
+                        if c.name == 'GP_copy':
+                            match = "✓" if layer_data_idx is not None and c.sample_index in range(layer_data_idx * 5, layer_data_idx * 5 + 5) else "✗ WRONG"
+                            print(f"    bone '{entry.bone}'  sample_index={c.sample_index}  muted={c.mute}  {match}")
+        print("═══════════════════════════════════════\n")
+        self.report({'INFO'}, "Debug printed to console (Window → Toggle System Console)")
+        return {'FINISHED'}
+
+
 def register():
     bpy.utils.register_class(GESTUREBONE_OT_CreateBoneConstraints)
     bpy.utils.register_class(GESTUREBONE_OT_DeleteBoneConstraints)
@@ -405,9 +460,11 @@ def register():
     bpy.utils.register_class(GESTUREBONE_OT_ApplyToBone)
     bpy.utils.register_class(GESTUREBONE_OT_LoadFromBone)
     bpy.utils.register_class(GESTUREBONE_OT_ToggleGPVisibility)
+    bpy.utils.register_class(GESTUREBONE_OT_DebugConstraintState)
 
 
 def unregister():
+    bpy.utils.unregister_class(GESTUREBONE_OT_DebugConstraintState)
     bpy.utils.unregister_class(GESTUREBONE_OT_ToggleGPVisibility)
     bpy.utils.unregister_class(GESTUREBONE_OT_LoadFromBone)
     bpy.utils.unregister_class(GESTUREBONE_OT_ApplyToBone)

@@ -125,7 +125,7 @@ def _ensure_chain_objects(arm, chain, context):
 
 
 def _ensure_gp_layer(arm, chain):
-    """Find or create a GP layer named after chain.part_name.
+    """Rename the chain's existing GP layer to match part_name, or create it if absent.
 
     Must be called from an operator execute(), NOT from a property update callback.
     """
@@ -133,39 +133,116 @@ def _ensure_gp_layer(arm, chain):
     if not (mod_props and mod_props.part_gp and chain.part_name):
         return
     gp_data = mod_props.part_gp.data
-    layer_name = chain.part_name
+    new_name = chain.part_name
     if not hasattr(gp_data, 'layers'):
         return
     try:
-        existing = [l.name for l in gp_data.layers]
-        if layer_name not in existing:
-            gp_data.layers.new(layer_name)
-        chain.part_layer = layer_name
+        # If the chain already points to a layer, rename it rather than orphaning it
+        old_layer = next((l for l in gp_data.layers if l.name == chain.part_layer), None) if chain.part_layer else None
+        if old_layer is not None:
+            old_layer.name = new_name
+            chain.part_layer = new_name
+        elif next((l for l in gp_data.layers if l.name == new_name), None) is None:
+            gp_data.layers.new(new_name)
+            chain.part_layer = new_name
+        else:
+            chain.part_layer = new_name
     except Exception as e:
-        print(f"GestureBone: could not create GP layer '{layer_name}': {e}")
+        print(f"GestureBone: could not ensure GP layer '{new_name}': {e}")
 
 
 def _sort_gp_layers(mod_props, chains):
-    """Reorder GP layers so their top-to-bottom order matches the chain list order.
+    """Reorder GP layers to match chain list order visually.
 
-    Algorithm: iterate chains in reverse and move each matching layer to TOP.
-    This puts chains[0] at the visual top of the GP layer panel.
-    Non-chain layers are left at the bottom, untouched.
+    In Blender 5.x GP3: data[0] = visual bottom, data[-1] = visual top.
+    So chains[0] must land at data[N-1], chains[1] at data[N-2], etc.
+    Uses insertion sort with 'DOWN' (decrease index) / 'UP' (increase index).
+    Only touches layers that belong to a chain; orphan layers are left untouched.
     """
     if not mod_props.part_gp:
         return
     gp_data = mod_props.part_gp.data
     if not hasattr(gp_data, 'layers'):
         return
-    layer_names = {l.name for l in gp_data.layers}
-    for chain in list(chains):
-        if chain.part_name and chain.part_name in layer_names:
-            layer = next((l for l in gp_data.layers if l.name == chain.part_name), None)
-            if layer:
-                try:
-                    gp_data.layers.move(layer, 'TOP')
-                except Exception as e:
-                    print(f"GestureBone: could not move layer '{chain.part_name}': {e}")
+
+    n_chains = len(chains)
+    for chain_idx, chain in enumerate(chains):
+        if not chain.part_name:
+            continue
+        # chains[0] → data[N-1] (visual top), chains[1] → data[N-2], …
+        target_idx = n_chains - 1 - chain_idx
+        current_idx = next((i for i, l in enumerate(gp_data.layers) if l.name == chain.part_name), None)
+        if current_idx is None:
+            continue
+        try:
+            while current_idx > target_idx:
+                gp_data.layers.move(gp_data.layers[current_idx], 'DOWN')
+                current_idx -= 1
+            while current_idx < target_idx:
+                gp_data.layers.move(gp_data.layers[current_idx], 'UP')
+                current_idx += 1
+        except Exception as e:
+            print(f"GestureBone: could not sort layer '{chain.part_name}': {e}")
+
+
+def _sync_gp_layers(arm, mod_props):
+    """Full one-shot sync: remove orphan layers, ensure each chain has a layer, reorder.
+
+    Safe to call from RefreshAllChains and after any structural change (add/remove/move chain).
+    """
+    if not mod_props.part_gp:
+        return
+    gp_data = mod_props.part_gp.data
+    if not hasattr(gp_data, 'layers'):
+        return
+
+    chain_names = {c.part_name for c in mod_props.chains if c.part_name}
+
+    # Remove layers that no longer have a matching chain
+    for layer in list(gp_data.layers):
+        if layer.name not in chain_names:
+            try:
+                gp_data.layers.remove(layer)
+            except Exception as e:
+                print(f"GestureBone: could not remove orphan layer '{layer.name}': {e}")
+
+    # Ensure every chain has a correctly named layer
+    for chain in mod_props.chains:
+        _ensure_gp_layer(arm, chain)
+
+    # Reorder layers to match chain list order
+    _sort_gp_layers(mod_props, mod_props.chains)
+
+
+def _cleanup_orphan_splines(arm, mod_props, scene):
+    """Delete CURVE objects in the <arm>_Splines_GP collection not referenced by any chain.
+
+    Only removes objects of type CURVE that live inside the managed collection and are
+    not assigned as part_gesture_spline or part_plotting_spline on any current chain.
+    The GP object and any non-curve objects are never touched.
+    """
+    coll_name = f"{arm.name}_Splines_GP"
+    splines_coll = bpy.data.collections.get(coll_name)
+    if splines_coll is None:
+        return
+
+    # Build the set of curve objects still in use
+    active = set()
+    for chain in mod_props.chains:
+        if chain.part_gesture_spline:
+            active.add(chain.part_gesture_spline.name)
+        if chain.part_plotting_spline:
+            active.add(chain.part_plotting_spline.name)
+
+    for obj in list(splines_coll.objects):
+        if obj.type != 'CURVE':
+            continue
+        if obj.name not in active:
+            print(f"GestureBone: removing orphan spline '{obj.name}'")
+            try:
+                bpy.data.objects.remove(obj, do_unlink=True)
+            except Exception as e:
+                print(f"GestureBone: could not remove '{obj.name}': {e}")
 
 
 def _ensure_gp_animation(mod_props, chains):

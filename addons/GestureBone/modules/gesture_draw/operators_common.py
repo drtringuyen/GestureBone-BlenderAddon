@@ -1,10 +1,16 @@
 import bpy
-from bpy.props import IntProperty
-from .utils import _arm, _mod_props, _find_gn_modifier, _find_socket_id, _ensure_gp_object, _ensure_chain_objects, _ensure_gp_layer, _sort_gp_layers, _refresh_bone_lists, _ensure_gp_animation
+from bpy.props import IntProperty, StringProperty
+from .utils import (
+    _arm, _mod_props,
+    _find_gn_modifier, _find_socket_id,
+    _ensure_gp_object, _ensure_chain_objects,
+    _ensure_gp_layer, _sync_gp_layers, _cleanup_orphan_splines,
+    _refresh_bone_lists, _ensure_gp_animation,
+)
 
 
 class GESTUREBONE_OT_AddChain(bpy.types.Operator):
-    """Add a new CurveBoneChain entry"""
+    """Add a new CurveBoneChain entry and its GP layer"""
     bl_idname = "gesturebone.add_chain"
     bl_label = "Add Chain"
 
@@ -19,11 +25,15 @@ class GESTUREBONE_OT_AddChain(bpy.types.Operator):
         if global_props.current_gp and not mod_props.part_gp:
             mod_props.part_gp = global_props.current_gp
         mod_props.active_chain_index = len(mod_props.chains) - 1
+
+        arm = _arm(context)
+        if arm and mod_props.part_gp:
+            _ensure_gp_layer(arm, chain)
         return {'FINISHED'}
 
 
 class GESTUREBONE_OT_RemoveChain(bpy.types.Operator):
-    """Remove the selected CurveBoneChain entry"""
+    """Remove the selected CurveBoneChain entry and its GP layer"""
     bl_idname = "gesturebone.remove_chain"
     bl_label = "Remove Chain"
     chain_index: IntProperty()
@@ -33,9 +43,62 @@ class GESTUREBONE_OT_RemoveChain(bpy.types.Operator):
         if mod_props is None:
             return {'CANCELLED'}
         idx = self.chain_index
-        if 0 <= idx < len(mod_props.chains):
-            mod_props.chains.remove(idx)
-            mod_props.active_chain_index = max(0, idx - 1)
+        if not (0 <= idx < len(mod_props.chains)):
+            return {'CANCELLED'}
+
+        chain = mod_props.chains[idx]
+        layer_name = chain.part_layer  # capture before removal
+
+        # Delete GP layer by name
+        gp_obj = mod_props.part_gp
+        if gp_obj and layer_name and hasattr(gp_obj.data, 'layers'):
+            layer = next((l for l in gp_obj.data.layers if l.name == layer_name), None)
+            if layer is not None:
+                try:
+                    gp_obj.data.layers.remove(layer)
+                except Exception as e:
+                    self.report({'WARNING'}, f"Could not remove GP layer '{layer_name}': {e}")
+
+        # Delete the gesture and plotting spline objects
+        for spline_obj in (chain.part_gesture_spline, chain.part_plotting_spline):
+            if spline_obj is not None:
+                try:
+                    bpy.data.objects.remove(spline_obj, do_unlink=True)
+                except Exception as e:
+                    self.report({'WARNING'}, f"Could not remove spline '{spline_obj.name}': {e}")
+
+        mod_props.chains.remove(idx)
+        mod_props.active_chain_index = max(0, idx - 1)
+        return {'FINISHED'}
+
+
+class GESTUREBONE_OT_MoveChain(bpy.types.Operator):
+    """Move a chain up or down; GP layer order follows automatically"""
+    bl_idname = "gesturebone.move_chain"
+    bl_label = "Move Chain"
+    chain_index: IntProperty()
+    direction: StringProperty()  # 'UP' or 'DOWN'
+
+    def execute(self, context):
+        mod_props = _mod_props(context)
+        if mod_props is None:
+            return {'CANCELLED'}
+        idx = self.chain_index
+        chains = mod_props.chains
+
+        if self.direction == 'UP' and idx > 0:
+            chains.move(idx, idx - 1)
+            mod_props.active_chain_index = idx - 1
+        elif self.direction == 'DOWN' and idx < len(chains) - 1:
+            chains.move(idx, idx + 1)
+            mod_props.active_chain_index = idx + 1
+        else:
+            return {'CANCELLED'}
+
+        arm = _arm(context)
+        if arm:
+            from .utils_chain import _sort_gp_layers
+            _sort_gp_layers(mod_props, mod_props.chains)
         return {'FINISHED'}
 
 
@@ -45,7 +108,6 @@ class GESTUREBONE_OT_TogglePoseGP(bpy.types.Operator):
     bl_label = "Switch Active"
 
     def _going_to_gp(self, context):
-        """True when the next action will switch TO the GP object."""
         arm_obj = _arm(context)
         return arm_obj is not None and context.view_layer.objects.active == arm_obj
 
@@ -107,7 +169,7 @@ class GESTUREBONE_OT_RefreshChain(bpy.types.Operator):
 
 
 class GESTUREBONE_OT_RefreshAllChains(bpy.types.Operator):
-    """Ensure GP object, splines, layers exist for all chains and fix layer order"""
+    """Sync GP layers and spline objects with chain list: rename, create, remove orphans, reorder"""
     bl_idname = "gesturebone.refresh_all_chains"
     bl_label = "Refresh All Chains"
 
@@ -120,9 +182,9 @@ class GESTUREBONE_OT_RefreshAllChains(bpy.types.Operator):
         _ensure_gp_object(arm, mod_props, context)
         for chain in mod_props.chains:
             _ensure_chain_objects(arm, chain, context)
-            _ensure_gp_layer(arm, chain)
             _refresh_bone_lists(chain)
-        _sort_gp_layers(mod_props, mod_props.chains)
+        _sync_gp_layers(arm, mod_props)
+        _cleanup_orphan_splines(arm, mod_props, context.scene)
         _ensure_gp_animation(mod_props, mod_props.chains)
         return {'FINISHED'}
 
@@ -130,6 +192,7 @@ class GESTUREBONE_OT_RefreshAllChains(bpy.types.Operator):
 def register():
     bpy.utils.register_class(GESTUREBONE_OT_AddChain)
     bpy.utils.register_class(GESTUREBONE_OT_RemoveChain)
+    bpy.utils.register_class(GESTUREBONE_OT_MoveChain)
     bpy.utils.register_class(GESTUREBONE_OT_TogglePoseGP)
     bpy.utils.register_class(GESTUREBONE_OT_RefreshChain)
     bpy.utils.register_class(GESTUREBONE_OT_RefreshAllChains)
@@ -139,5 +202,6 @@ def unregister():
     bpy.utils.unregister_class(GESTUREBONE_OT_RefreshAllChains)
     bpy.utils.unregister_class(GESTUREBONE_OT_RefreshChain)
     bpy.utils.unregister_class(GESTUREBONE_OT_TogglePoseGP)
+    bpy.utils.unregister_class(GESTUREBONE_OT_MoveChain)
     bpy.utils.unregister_class(GESTUREBONE_OT_RemoveChain)
     bpy.utils.unregister_class(GESTUREBONE_OT_AddChain)

@@ -4,7 +4,8 @@ from .utils import _find_gn_modifier, _find_socket_id, _constraints_are_muted, _
 
 def _chain_is_ready(mod_props, chain):
     has_bone = any(entry.bone for entry in chain.part_control_bones)
-    return mod_props.part_gp is not None and chain.is_bound and has_bone
+    has_gesture_spline = chain.part_gesture_spline is not None
+    return mod_props.part_gp is not None and chain.is_bound and has_bone and has_gesture_spline
 
 
 def _active_arm(context):
@@ -73,15 +74,13 @@ class GESTUREBONE_PT_GestureDrawBinding(bpy.types.Panel):
 
         row = layout.row(align=True)
         row.operator("gesturebone.add_chain", icon='ADD', text="Add Chain")
-        if mod_props.chains:
-            row.operator("gesturebone.remove_chain", icon='REMOVE', text="").chain_index = len(mod_props.chains) - 1
         row.operator("gesturebone.refresh_all_chains", icon='FILE_REFRESH', text="")
 
         for i, chain in enumerate(mod_props.chains):
             ready = _chain_is_ready(mod_props, chain)
             box = layout.box()
 
-            # ── Header row: collapse toggle | status | name | bind ──────────
+            # ── Header row: collapse | status | name | ↑↓ | bind ───────────
             header = box.row(align=True)
             header.prop(
                 chain, "bones_expanded",
@@ -92,6 +91,18 @@ class GESTUREBONE_PT_GestureDrawBinding(bpy.types.Panel):
             header.label(text="", icon='LAYER_ACTIVE' if ready else 'ERROR')
             header.prop(chain, "part_name", text="")
 
+            move_sub = header.row(align=True)
+            up_sub = move_sub.row(align=True)
+            up_sub.enabled = i > 0
+            op = up_sub.operator("gesturebone.move_chain", text="", icon='TRIA_UP')
+            op.chain_index = i
+            op.direction = 'UP'
+            dn_sub = move_sub.row(align=True)
+            dn_sub.enabled = i < len(mod_props.chains) - 1
+            op = dn_sub.operator("gesturebone.move_chain", text="", icon='TRIA_DOWN')
+            op.chain_index = i
+            op.direction = 'DOWN'
+
             bind_sub = header.row(align=True)
             bind_sub.active_default = chain.is_bound
             if chain.is_bound:
@@ -100,12 +111,14 @@ class GESTUREBONE_PT_GestureDrawBinding(bpy.types.Panel):
                 op = bind_sub.operator("gesturebone.create_bone_constraints", text="", icon='UNLINKED')
             op.chain_index = i
 
+            rem_op = header.operator("gesturebone.remove_chain", text="", icon='X')
+            rem_op.chain_index = i
+
             # ── Body (only when expanded) ───────────────────────────────────
             if chain.bones_expanded:
-                # Layer + Material row
+                # Layer row (no material)
                 lm_row = box.row(align=True)
                 lm_row.prop(chain, "part_layer", text="", icon='RENDERLAYERS')
-                lm_row.prop(chain, "part_material", text="", icon='MATERIAL')
 
                 col = box.column(align=True)
 
@@ -130,28 +143,7 @@ class GESTUREBONE_PT_GestureDrawBinding(bpy.types.Panel):
                     for j, entry in enumerate(chain.part_control_bones):
                         col.prop(entry, "bone", text=f"  Bone {j + 1}")
 
-                col.separator(factor=0.5)
-
-                # Plotting spline + plotting mode enum on same row
-                plotting_row = col.row(align=True)
-                plotting_row.prop(chain, "part_plotting_spline", text="Plotting Spline", icon='CURVE_DATA')
-                pp_sub = plotting_row.row(align=True)
-                pp_sub.scale_x = 0.65
-                pp_sub.prop(chain, "part_plotting_mode", text="")
-
-                # Plotting bones collapsible header + refresh button
-                plot_header = col.row(align=True)
-                plot_header.prop(
-                    chain, "plotting_bones_expanded",
-                    text="Plotting Bones",
-                    icon='TRIA_DOWN' if chain.plotting_bones_expanded else 'TRIA_RIGHT',
-                    emboss=False,
-                )
-                op = plot_header.operator("gesturebone.refresh_chain", text="", icon='FILE_REFRESH')
-                op.chain_index = i
-                if chain.plotting_bones_expanded:
-                    for j, entry in enumerate(chain.part_plotting_bones):
-                        col.prop(entry, "bone", text=f"  Bone {j + 1}")
+                # Plotting spline and bones hidden for now
 
 
 class GESTUREBONE_PT_GestureDrawGestures(bpy.types.Panel):
@@ -298,6 +290,17 @@ class GESTUREBONE_PT_GestureDrawDebug(bpy.types.Panel):
         if not mod_props.chains:
             layout.label(text="No chains", icon='INFO')
             return
+
+        layout.operator("gesturebone.debug_constraint_state", icon='CONSOLE')
+
+        if gp_obj := getattr(mod_props, 'part_gp', None):
+            col = layout.column(align=True)
+            col.label(text="GP layers (data[0]=bottom, data[-1]=top):")
+            n = len(gp_obj.data.layers)
+            for i, l in enumerate(gp_obj.data.layers):
+                visual_pos = n - 1 - i  # 0 = visual top
+                active_tag = " ← active" if l == gp_obj.data.layers.active else ""
+                col.label(text=f"  visual[{visual_pos}] data[{i}] '{l.name}'{active_tag}", icon='RENDERLAYERS')
 
         for i, chain in enumerate(mod_props.chains):
             box = layout.box()

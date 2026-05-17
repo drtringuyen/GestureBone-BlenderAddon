@@ -77,10 +77,15 @@ class GESTUREBONE_PT_MainPanel(bpy.types.Panel):
             mod_props = getattr(arm, 'gesturebone_gesture_draw_props', None)
             if mod_props:
                 for chain in mod_props.chains:
-                    if not chain.is_bound:
-                        row = layout.row()
-                        row.alert = True
-                        row.label(text=f"Unbound: {chain.part_name}", icon='UNLINKED')
+                    if chain.is_bound:
+                        continue
+                    has_spline = chain.part_gesture_spline is not None
+                    has_bones = any(entry.bone for entry in chain.part_control_bones)
+                    if has_spline and has_bones:
+                        continue
+                    row = layout.row()
+                    row.alert = True
+                    row.label(text=f"Unbound: {chain.part_name}", icon='UNLINKED')
 
         if props.debug_mode:
             col = layout.column(align=True)

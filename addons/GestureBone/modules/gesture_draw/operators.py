@@ -1,5 +1,5 @@
 import bpy
-from bpy.props import IntProperty
+from bpy.props import IntProperty, EnumProperty
 from .curve_bone_chain import SPLINE_GEONODE_DEFAULTS
 from .utils import (
     _CONSTRAINT_NAME, _CONSTRAINT_TYPE,
@@ -113,12 +113,160 @@ class GESTUREBONE_OT_ToggleConstraintActive(bpy.types.Operator):
         return {'FINISHED'}
 
 
+# ── Shared spline bake helper ─────────────────────────────────────────────────
+
+def _bake_spline_to_gp(op, context, gesture_spline, gp_obj, chain, frame_num):
+    """Evaluate gesture_spline with modifiers applied, write strokes into gp_obj.
+
+    Pure data API — no bpy.ops calls.
+    """
+    if gesture_spline is None:
+        op.report({'WARNING'}, "No gesture spline — nothing to bake")
+        return
+    if gesture_spline.type not in ('CURVE', 'MESH', 'SURFACE'):
+        op.report({'WARNING'}, f"Gesture spline type '{gesture_spline.type}' cannot be converted to mesh")
+        return
+    if gp_obj is None:
+        op.report({'WARNING'}, "No GP object — nothing to write strokes into")
+        return
+    if not hasattr(gp_obj.data, 'layers'):
+        op.report({'WARNING'}, "GP object is not GP3 — cannot write strokes")
+        return
+
+    target_layer = next((l for l in gp_obj.data.layers if l.name == chain.part_layer), None)
+    if target_layer is None:
+        op.report({'WARNING'}, f"Layer '{chain.part_layer}' not found in GP object")
+        return
+
+    depsgraph = context.evaluated_depsgraph_get()
+    mesh = None
+    try:
+        mesh = bpy.data.meshes.new_from_object(gesture_spline, depsgraph=depsgraph)
+    except Exception as e:
+        op.report({'WARNING'}, f"Could not evaluate gesture spline as mesh: {e}")
+        return
+
+    try:
+        if not mesh or not mesh.edges:
+            op.report({'WARNING'}, "Gesture spline produced an empty mesh — nothing to bake")
+            return
+        chains = _mesh_edge_chains(mesh)
+    finally:
+        if mesh is not None:
+            bpy.data.meshes.remove(mesh)
+
+    if not chains:
+        op.report({'WARNING'}, "No edge chains found in evaluated mesh — nothing to write")
+        return
+
+    # Keep only the last drawn spline — discard any accidental earlier strokes
+    chains = chains[-1:]
+
+    target_frame = next((f for f in target_layer.frames if f.frame_number == frame_num), None)
+    if target_frame is None:
+        try:
+            target_frame = target_layer.frames.new(frame_num)
+        except Exception as e:
+            op.report({'WARNING'}, f"Could not create frame {frame_num}: {e}")
+            return
+
+    dst_drawing = getattr(target_frame, 'drawing', None)
+    if dst_drawing is None:
+        op.report({'WARNING'}, "Target frame has no drawing — GP2 not supported")
+        return
+
+    mat_index = 0
+    if chain.part_material:
+        for i, slot in enumerate(gp_obj.material_slots):
+            if slot.material == chain.part_material:
+                mat_index = i
+                break
+
+    matrix = gesture_spline.matrix_world
+    written = 0
+    for verts in chains:
+        if len(verts) < 2:
+            continue
+        try:
+            dst_drawing.add_strokes([len(verts)])
+            stroke = dst_drawing.strokes[-1]
+            stroke.material_index = mat_index
+            for i, co in enumerate(verts):
+                stroke.points[i].position = matrix @ co
+            written += 1
+        except Exception as e:
+            op.report({'WARNING'}, f"Could not add stroke: {e}")
+
+    if written == 0:
+        op.report({'WARNING'}, "No strokes written — all chains may be too short")
+    else:
+        op.report({'INFO'}, f"Baked {written} stroke(s) → '{chain.part_layer}' frame {frame_num}")
+
+
+# ── Shared enter-edit-mode helper ─────────────────────────────────────────────
+
+def _enter_spline_edit_mode(op, context, mod_props, chain, arm_obj, tool):
+    """Deactivate all other chains, then enter curve Edit mode on chain's gesture spline."""
+    gesture_spline = chain.part_gesture_spline
+    if not gesture_spline:
+        op.report({'ERROR'}, "No gesture spline — refresh the chain first")
+        return {'CANCELLED'}
+
+    # Deactivate every other drawing chain
+    for other in mod_props.chains:
+        if other != chain and other.is_drawing:
+            other.is_drawing = False
+            other.drawing_frame = -1
+
+    if context.active_object:
+        chain.prev_active_object = context.active_object.name
+        chain.prev_mode = context.active_object.mode
+
+    if context.object and context.object.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    # Clear existing splines when entering draw mode — fresh canvas
+    if tool == 'DRAW' and gesture_spline.data.splines:
+        gesture_spline.data.splines.clear()
+
+    _ensure_object_collections_visible(context.view_layer, gesture_spline)
+    gesture_spline.hide_set(False)
+
+    bpy.ops.object.select_all(action='DESELECT')
+    gesture_spline.select_set(True)
+    context.view_layer.objects.active = gesture_spline
+    bpy.ops.object.mode_set(mode='EDIT')
+
+    tool_id = "builtin.draw" if tool == 'DRAW' else "builtin.select_box"
+    bpy.ops.wm.tool_set_by_id(name=tool_id, space_type='VIEW_3D')
+
+    chain.active_tool = tool
+    chain.drawing_frame = context.scene.frame_current
+    chain.is_drawing = True
+    return {'FINISHED'}
+
+
 # ── Drawing operators ──────────────────────────────────────────────────────────
 
-class GESTUREBONE_OT_ToggleDrawing(bpy.types.Operator):
-    """Toggle: enter Edit mode on gesture spline (ON) / convert to GP + copy strokes back (OFF)"""
-    bl_idname = "gesturebone.toggle_drawing"
-    bl_label = "Toggle Drawing"
+class GESTUREBONE_OT_ActivateChain(bpy.types.Operator):
+    """Enter curve Edit mode on this chain's gesture spline with the draw tool"""
+    bl_idname = "gesturebone.activate_chain"
+    bl_label = "Activate Chain"
+    chain_index: IntProperty()
+
+    def execute(self, context):
+        mod_props = _mod_props(context)
+        chain = _get_chain(context, self.chain_index)
+        if mod_props is None or chain is None:
+            return {'CANCELLED'}
+        arm_obj = _arm(context)
+        return _enter_spline_edit_mode(self, context, mod_props, chain, arm_obj, 'DRAW')
+
+
+class GESTUREBONE_OT_ToggleSplineTool(bpy.types.Operator):
+    """Toggle between draw and edit-spline tools; activates the chain if not yet active"""
+    bl_idname = "gesturebone.toggle_spline_tool"
+    bl_label = "Toggle Spline Tool"
     chain_index: IntProperty()
 
     def execute(self, context):
@@ -128,70 +276,55 @@ class GESTUREBONE_OT_ToggleDrawing(bpy.types.Operator):
             return {'CANCELLED'}
         arm_obj = _arm(context)
 
-        if chain.is_drawing:
-            return self._toggle_off(context, mod_props, chain, arm_obj)
-        else:
-            return self._toggle_on(context, mod_props, chain, arm_obj)
+        if not chain.is_drawing:
+            # Not active — enter draw mode (clears existing splines)
+            return _enter_spline_edit_mode(self, context, mod_props, chain, arm_obj, 'DRAW')
 
-    # ── Toggle ON ──────────────────────────────────────────────────────────────
-
-    def _toggle_on(self, context, mod_props, chain, arm_obj):
         gesture_spline = chain.part_gesture_spline
-        if not gesture_spline:
-            self.report({'ERROR'}, "No gesture spline set — refresh the chain first")
+        in_edit = (gesture_spline
+                   and context.active_object == gesture_spline
+                   and context.mode == 'EDIT_CURVE')
+
+        if chain.active_tool == 'DRAW':
+            # Currently drawing — switch to edit/select tool (no clear)
+            if in_edit:
+                bpy.ops.wm.tool_set_by_id(name="builtin.select_box", space_type='VIEW_3D')
+            chain.active_tool = 'EDIT'
+            return {'FINISHED'}
+        else:
+            # Currently editing — switch back to draw tool (clear and redraw)
+            return _enter_spline_edit_mode(self, context, mod_props, chain, arm_obj, 'DRAW')
+
+
+# ── Apply to bone ──────────────────────────────────────────────────────────────
+
+class GESTUREBONE_OT_ApplyToBone(bpy.types.Operator):
+    """Exit spline edit mode, bake curve to GP, then key bone transforms for this chain"""
+    bl_idname = "gesturebone.apply_to_bone"
+    bl_label = "Apply to Bone"
+    chain_index: IntProperty()
+
+    def execute(self, context):
+        mod_props = _mod_props(context)
+        arm_obj = _arm(context)
+        chain = _get_chain(context, self.chain_index)
+        if arm_obj is None or chain is None or mod_props is None:
             return {'CANCELLED'}
-        gp_obj = mod_props.part_gp
+        if not _constraints_exist(arm_obj, chain):
+            self.report({'ERROR'}, "No constraints — bind the chain first")
+            return {'CANCELLED'}
 
-        # Turn off any other chain that is currently drawing
-        for j, other in enumerate(mod_props.chains):
-            if j != self.chain_index and other.is_drawing:
-                other.is_drawing = False
-                other.drawing_frame = -1
-
-        # Save current state for restoration
-        if context.active_object:
-            chain.prev_active_object = context.active_object.name
-            chain.prev_mode = context.active_object.mode
-
-        if context.object and context.object.mode != 'OBJECT':
-            bpy.ops.object.mode_set(mode='OBJECT')
-
-        # Ensure the gesture spline's collection is visible in the view layer
-        _ensure_object_collections_visible(context.view_layer, gesture_spline)
-        gesture_spline.hide_set(False)
-
-        # Select and enter Edit mode on the gesture spline
-        bpy.ops.object.select_all(action='DESELECT')
-        gesture_spline.select_set(True)
-        context.view_layer.objects.active = gesture_spline
-        bpy.ops.object.mode_set(mode='EDIT')
-
-        # Switch to freehand draw tool
-        bpy.ops.wm.tool_set_by_id(name="builtin.draw", space_type='VIEW_3D')
-
-        # Set the active GP layer to the one registered in this chain
-        if gp_obj and chain.part_layer:
-            layer = next((l for l in gp_obj.data.layers if l.name == chain.part_layer), None)
-            if layer:
-                gp_obj.data.layers.active = layer
-
-        chain.drawing_frame = context.scene.frame_current
-        chain.is_drawing = True
-        return {'FINISHED'}
-
-    # ── Toggle OFF ─────────────────────────────────────────────────────────────
-
-    def _toggle_off(self, context, mod_props, chain, arm_obj):
         gesture_spline = chain.part_gesture_spline
         gp_obj = mod_props.part_gp
         frame_num = chain.drawing_frame if chain.drawing_frame >= 0 else context.scene.frame_current
 
-        # Exit edit mode so curve data is finalised
+        # Exit edit mode to finalise curve data
         if context.object and context.object.mode != 'OBJECT':
             bpy.ops.object.mode_set(mode='OBJECT')
 
+        # Bake spline shape to GP layer
         if gesture_spline and gp_obj and chain.part_layer:
-            self._bake_spline_to_gp(context, gesture_spline, gp_obj, chain, frame_num)
+            _bake_spline_to_gp(self, context, gesture_spline, gp_obj, chain, frame_num)
 
         chain.is_drawing = False
         chain.drawing_frame = -1
@@ -203,126 +336,14 @@ class GESTUREBONE_OT_ToggleDrawing(bpy.types.Operator):
             context.view_layer.objects.active = arm_obj
             bpy.ops.object.mode_set(mode='POSE')
 
-        return {'FINISHED'}
-
-    def _bake_spline_to_gp(self, context, gesture_spline, gp_obj, chain, frame_num):
-        """Evaluate gesture_spline with all modifiers applied, write strokes into gp_obj.
-
-        Pure data API — no bpy.ops calls, no undo stack entries beyond the parent operator.
-        Uses new_from_object() for a single depsgraph evaluation pass (replaces the old
-        duplicate → convert-to-mesh → modifier_apply × N chain).
-        """
-        # ── Guards ────────────────────────────────────────────────────────────
-        if gesture_spline is None:
-            self.report({'WARNING'}, "No gesture spline — nothing to bake")
-            return
-        if gesture_spline.type not in ('CURVE', 'MESH', 'SURFACE'):
-            self.report({'WARNING'}, f"Gesture spline type '{gesture_spline.type}' cannot be converted to mesh")
-            return
-        if gp_obj is None:
-            self.report({'WARNING'}, "No GP object — nothing to write strokes into")
-            return
-        if not hasattr(gp_obj.data, 'layers'):
-            self.report({'WARNING'}, "GP object is not GP3 — cannot write strokes")
-            return
-
-        target_layer = next((l for l in gp_obj.data.layers if l.name == chain.part_layer), None)
-        if target_layer is None:
-            self.report({'WARNING'}, f"Layer '{chain.part_layer}' not found in GP object")
-            return
-
-        # ── Evaluate mesh with modifiers applied — data API, no undo push ────
-        depsgraph = context.evaluated_depsgraph_get()
-        mesh = None
-        try:
-            mesh = bpy.data.meshes.new_from_object(gesture_spline, depsgraph=depsgraph)
-        except Exception as e:
-            self.report({'WARNING'}, f"Could not evaluate gesture spline as mesh: {e}")
-            return
-
-        try:
-            if not mesh or not mesh.edges:
-                self.report({'WARNING'}, "Gesture spline produced an empty mesh — nothing to bake")
-                return
-
-            # ── Extract stroke geometry from mesh edge chains ─────────────────
-            chains = _mesh_edge_chains(mesh)
-        finally:
-            if mesh is not None:
-                bpy.data.meshes.remove(mesh)
-
-        if not chains:
-            self.report({'WARNING'}, "No edge chains found in evaluated mesh — nothing to write")
-            return
-
-        # ── Target frame (create if absent) — data API ────────────────────────
-        target_frame = next((f for f in target_layer.frames if f.frame_number == frame_num), None)
-        if target_frame is None:
-            try:
-                target_frame = target_layer.frames.new(frame_num)
-            except Exception as e:
-                self.report({'WARNING'}, f"Could not create frame {frame_num}: {e}")
-                return
-
-        dst_drawing = getattr(target_frame, 'drawing', None)
-        if dst_drawing is None:
-            self.report({'WARNING'}, "Target frame has no drawing — GP2 not supported")
-            return
-
-        # ── Resolve material index ─────────────────────────────────────────────
-        mat_index = 0
-        if chain.part_material:
-            for i, slot in enumerate(gp_obj.material_slots):
-                if slot.material == chain.part_material:
-                    mat_index = i
-                    break
-
-        # ── Write strokes — data API ──────────────────────────────────────────
-        matrix = gesture_spline.matrix_world
-        written = 0
-        for verts in chains:
-            if len(verts) < 2:
-                continue
-            try:
-                dst_drawing.add_strokes([len(verts)])
-                stroke = dst_drawing.strokes[-1]
-                stroke.material_index = mat_index
-                for i, co in enumerate(verts):
-                    stroke.points[i].position = matrix @ co
-                written += 1
-            except Exception as e:
-                self.report({'WARNING'}, f"Could not add stroke: {e}")
-
-        if written == 0:
-            self.report({'WARNING'}, "No strokes written — all chains may be too short")
-        else:
-            self.report({'INFO'}, f"Baked {written} stroke(s) → '{chain.part_layer}' frame {frame_num}")
-
-
-# ── Apply to bone ──────────────────────────────────────────────────────────────
-
-class GESTUREBONE_OT_ApplyToBone(bpy.types.Operator):
-    """Unmute constraints, bake current frame pose to keyframes, then mute constraints"""
-    bl_idname = "gesturebone.apply_to_bone"
-    bl_label = "Apply to Bone"
-    chain_index: IntProperty()
-
-    def execute(self, context):
-        arm_obj = _arm(context)
-        chain = _get_chain(context, self.chain_index)
-        if arm_obj is None or chain is None:
-            return {'CANCELLED'}
-        if not _constraints_exist(arm_obj, chain):
-            self.report({'ERROR'}, "No constraints — bind the chain first")
-            return {'CANCELLED'}
-
-        frame_num = context.scene.frame_current
+        # Unmute constraints → evaluate → key bones → mute
         _unmute_constraints(arm_obj, chain)
         context.view_layer.update()
         depsgraph = context.evaluated_depsgraph_get()
         _apply_and_key_data(arm_obj, chain, frame_num, depsgraph)
         _mute_constraints(arm_obj, chain)
-        self.report({'INFO'}, f"Baked chain '{chain.part_name}' → frame {frame_num}")
+
+        self.report({'INFO'}, f"Applied chain '{chain.part_name}' → frame {frame_num}")
         return {'FINISHED'}
 
 
@@ -456,7 +477,8 @@ def register():
     bpy.utils.register_class(GESTUREBONE_OT_CreateBoneConstraints)
     bpy.utils.register_class(GESTUREBONE_OT_DeleteBoneConstraints)
     bpy.utils.register_class(GESTUREBONE_OT_ToggleConstraintActive)
-    bpy.utils.register_class(GESTUREBONE_OT_ToggleDrawing)
+    bpy.utils.register_class(GESTUREBONE_OT_ActivateChain)
+    bpy.utils.register_class(GESTUREBONE_OT_ToggleSplineTool)
     bpy.utils.register_class(GESTUREBONE_OT_ApplyToBone)
     bpy.utils.register_class(GESTUREBONE_OT_LoadFromBone)
     bpy.utils.register_class(GESTUREBONE_OT_ToggleGPVisibility)
@@ -468,7 +490,8 @@ def unregister():
     bpy.utils.unregister_class(GESTUREBONE_OT_ToggleGPVisibility)
     bpy.utils.unregister_class(GESTUREBONE_OT_LoadFromBone)
     bpy.utils.unregister_class(GESTUREBONE_OT_ApplyToBone)
-    bpy.utils.unregister_class(GESTUREBONE_OT_ToggleDrawing)
+    bpy.utils.unregister_class(GESTUREBONE_OT_ToggleSplineTool)
+    bpy.utils.unregister_class(GESTUREBONE_OT_ActivateChain)
     bpy.utils.unregister_class(GESTUREBONE_OT_ToggleConstraintActive)
     bpy.utils.unregister_class(GESTUREBONE_OT_DeleteBoneConstraints)
     bpy.utils.unregister_class(GESTUREBONE_OT_CreateBoneConstraints)

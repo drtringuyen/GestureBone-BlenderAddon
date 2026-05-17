@@ -99,6 +99,11 @@ class GESTUREBONE_PG_CurveBoneChain(bpy.types.PropertyGroup):
     part_name: StringProperty(name="Name", default="Chain", update=_on_part_name_update)
     part_layer: StringProperty(name="Layer", search=_layer_search)
     part_material: PointerProperty(name="Material", type=bpy.types.Material)
+    active_tool: EnumProperty(
+        name="Active Tool",
+        items=[('DRAW', 'Draw', ''), ('EDIT', 'Edit', '')],
+        default='DRAW',
+    )
 
     # ── Gesture (control) spline ───────────────────────────────────────────────
     part_gesture_spline: PointerProperty(

@@ -1,5 +1,5 @@
 import bpy
-from bpy.props import IntProperty, StringProperty
+from bpy.props import IntProperty, EnumProperty
 from .utils import (
     _arm, _mod_props,
     _find_gn_modifier, _find_socket_id,
@@ -77,7 +77,7 @@ class GESTUREBONE_OT_MoveChain(bpy.types.Operator):
     bl_idname = "gesturebone.move_chain"
     bl_label = "Move Chain"
     chain_index: IntProperty()
-    direction: StringProperty()  # 'UP' or 'DOWN'
+    direction: EnumProperty(items=[('UP', 'Up', ''), ('DOWN', 'Down', '')])
 
     def execute(self, context):
         mod_props = _mod_props(context)

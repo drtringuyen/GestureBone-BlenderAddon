@@ -1,5 +1,4 @@
 import bpy
-from .utils import _find_gn_modifier, _find_socket_id, _constraints_are_muted, _constraints_exist
 
 
 def _chain_is_ready(mod_props, chain):
@@ -15,19 +14,6 @@ def _active_arm(context):
     fallback = context.scene.gesturebone_props.current_armature
     return fallback if fallback and fallback.type == 'ARMATURE' else None
 
-
-def _get_gp_invisible(mod_props):
-    """Return True if the GP Invisible socket is ON (i.e. geometry is hidden)."""
-    gp_obj = mod_props.part_gp if mod_props else None
-    if not gp_obj:
-        return False
-    mod = _find_gn_modifier(gp_obj)
-    if not mod:
-        return False
-    sid = _find_socket_id(mod, "Invisible")
-    if sid is None:
-        return False
-    return bool(mod.get(sid, False))
 
 
 class GESTUREBONE_PT_GestureDraw(bpy.types.Panel):
@@ -190,49 +176,29 @@ class GESTUREBONE_PT_GestureDrawGestures(bpy.types.Panel):
         for i, chain in enumerate(mod_props.chains):
             row = layout.row(align=True)
 
-            # Visibility eye — reads from GN Invisible socket
-            is_invisible = _get_gp_invisible(mod_props)
-            vis_sub = row.row(align=True)
-            vis_sub.active_default = not is_invisible
-            op = vis_sub.operator(
-                "gesturebone.toggle_gp_visibility", text="",
-                icon='HIDE_ON' if is_invisible else 'HIDE_OFF',
-            )
-            op.chain_index = i
-
-            # Wide draw toggle
-            draw_sub = row.row(align=True)
-            draw_sub.scale_x = 4.0
-            draw_sub.alert = chain.is_drawing
-            op = draw_sub.operator(
-                "gesturebone.toggle_drawing",
+            # Wide merged button — chain name label + draw/edit toggle
+            tool_icon = 'CON_SPLINEIK' if (chain.is_drawing and chain.active_tool == 'EDIT') else 'GREASEPENCIL'
+            name_sub = row.row(align=True)
+            name_sub.scale_x = 4.0
+            name_sub.alert = chain.is_drawing
+            tool_op = name_sub.operator(
+                "gesturebone.toggle_spline_tool",
                 text=chain.part_name or f"Chain {i + 1}",
-                icon='GREASEPENCIL',
+                icon=tool_icon,
+                depress=chain.is_drawing,
             )
+            tool_op.chain_index = i
+
+            # Apply to bone: exit edit → bake GP → key bones
+            op = row.operator("gesturebone.apply_to_bone", text="", icon='SORT_ASC')
             op.chain_index = i
 
-            # Apply current GP spline pose to bone keyframe
-            op = row.operator("gesturebone.apply_to_bone", text="", icon='ACTION')
+            # Load from bone: select gesture spline, ensure GN modifier
+            op = row.operator("gesturebone.load_from_bone", text="", icon='SORT_DESC')
             op.chain_index = i
 
-            # Select gesture spline and ensure Snap_to_bones GN modifier
-            op = row.operator("gesturebone.load_from_bone", text="", icon='EMPTY_SINGLE_ARROW')
-            op.chain_index = i
-
-            # Delete current frame keys + strokes, then restore last reference pose
+            # Delete current frame keys + strokes
             op = row.operator("gesturebone.delete_baked_frames", text="", icon='KEY_DEHLT')
-            op.chain_index = i
-
-            # Constraint toggle: active (unmuted) / muted / unbound
-            con_sub = row.row(align=True)
-            if chain.is_bound and arm and _constraints_exist(arm, chain):
-                is_active = not _constraints_are_muted(arm, chain)
-                con_sub.active_default = is_active
-                icon = 'LINKED' if is_active else 'UNLINKED'
-            else:
-                con_sub.active_default = False
-                icon = 'UNLINKED'
-            op = con_sub.operator("gesturebone.toggle_constraint_active", text="", icon=icon)
             op.chain_index = i
 
 
@@ -248,6 +214,7 @@ _CHAIN_FIELDS = [
     ("part_plotting_point_count","Plotting Count (derived)"),
     ("is_bound",                 "Is Bound"),
     ("is_drawing",               "Is Drawing"),
+    ("active_tool",              "Active Tool"),
     ("bones_expanded",           "Bones Expanded"),
     ("control_bones_expanded",   "Ctrl Bones Expanded"),
     ("plotting_bones_expanded",  "Plot Bones Expanded"),

@@ -262,7 +262,7 @@ class GESTUREBONE_PT_GestureDrawDebug(bpy.types.Panel):
 
         if gp_obj := getattr(mod_props, 'part_gp', None):
             col = layout.column(align=True)
-            col.label(text="GP layers (data[0]=bottom, data[-1]=top):")
+            col.label(text="GP layers (data[0]=bottom, data[N-1]=top):")
             n = len(gp_obj.data.layers)
             for i, l in enumerate(gp_obj.data.layers):
                 visual_pos = n - 1 - i  # 0 = visual top

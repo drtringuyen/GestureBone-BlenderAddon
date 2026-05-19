@@ -1,6 +1,5 @@
 import bpy
 from bpy.props import IntProperty, EnumProperty
-from .curve_bone_chain import SPLINE_GEONODE_DEFAULTS
 from .utils import (
     _CONSTRAINT_NAME, _CONSTRAINT_TYPE,
     _arm, _mod_props, _get_chain, _bone_names,
@@ -11,7 +10,6 @@ from .utils import (
     _ensure_object_collections_visible,
     _mesh_edge_chains,
 )
-from ... import assets
 
 
 # ── Constraint operators ───────────────────────────────────────────────────────
@@ -52,9 +50,8 @@ class GESTUREBONE_OT_CreateBoneConstraints(bpy.types.Operator):
             con.attribute_name = "instance_transform"
             con.data_type = 'FLOAT4X4'
             con.domain = 'INSTANCE'
-            # GN modifier processes layers from visual top → chains[0] gets slots 0-4.
-            # _sort_gp_layers keeps chains[0] at data[-1] (visual top), so chain_index
-            # matches the GN processing order.
+            # GN processes layers from data[0] (visual bottom) first → chains[0] gets slots 0-4.
+            # _sort_gp_layers keeps chains[0] at data[0], so chain_index matches GN processing order.
             con.sample_index = i + self.chain_index * 5
             con.mix_mode = 'REPLACE'
             con.influence = 1.0
@@ -350,47 +347,85 @@ class GESTUREBONE_OT_ApplyToBone(bpy.types.Operator):
 # ── Load from bone ─────────────────────────────────────────────────────────────
 
 class GESTUREBONE_OT_LoadFromBone(bpy.types.Operator):
-    """Select the gesture spline and ensure the Snap_to_bones GN modifier is applied"""
+    """Copy the evaluated plotting spline shape into the gesture spline and enter edit mode"""
     bl_idname = "gesturebone.load_from_bone"
     bl_label = "Load from Bone"
     chain_index: IntProperty()
 
     def execute(self, context):
+        mod_props = _mod_props(context)
+        arm_obj = _arm(context)
         chain = _get_chain(context, self.chain_index)
-        if chain is None:
-            return {'CANCELLED'}
-        gesture_spline = chain.part_gesture_spline
-        if not gesture_spline:
-            self.report({'ERROR'}, "No gesture spline set — refresh the chain first")
+        if chain is None or mod_props is None:
             return {'CANCELLED'}
 
-        # Ensure object mode before switching active
+        plotting_spline = chain.part_plotting_spline
+        gesture_spline = chain.part_gesture_spline
+        if not plotting_spline:
+            self.report({'ERROR'}, "No plotting spline — refresh the chain first")
+            return {'CANCELLED'}
+        if not gesture_spline:
+            self.report({'ERROR'}, "No gesture spline — refresh the chain first")
+            return {'CANCELLED'}
+
+        # Ensure object mode
         if context.object and context.object.mode != 'OBJECT':
             bpy.ops.object.mode_set(mode='OBJECT')
 
-        _ensure_object_collections_visible(context.view_layer, gesture_spline)
-        gesture_spline.hide_set(False)
+        # Find the GN modifier on the plotting spline
+        plotting_mod = next((m for m in plotting_spline.modifiers if m.type == 'NODES'), None)
+        if plotting_mod is None:
+            self.report({'ERROR'}, "No Geometry Nodes modifier on plotting spline")
+            return {'CANCELLED'}
 
-        bpy.ops.object.select_all(action='DESELECT')
-        gesture_spline.select_set(True)
-        context.view_layer.objects.active = gesture_spline
+        convert_socket_id = _find_socket_id(plotting_mod, "convert")
+        if convert_socket_id is None:
+            self.report({'ERROR'}, "No 'convert' socket found on plotting spline modifier")
+            return {'CANCELLED'}
 
-        # Add Snap_to_bones GN modifier if not already present
-        node_name = SPLINE_GEONODE_DEFAULTS['gesture']
-        ng = assets.ensure_node_group(node_name)
-        if ng is None:
-            self.report({'WARNING'}, f"Node group '{node_name}' not found in essentials.blend")
-            return {'FINISHED'}
+        # 1. Enable the convert toggle and force a full depsgraph evaluation
+        plotting_mod[convert_socket_id] = True
+        plotting_spline.update_tag()
+        context.view_layer.update()
 
-        existing = next(
-            (m for m in gesture_spline.modifiers if m.type == 'NODES' and m.node_group == ng),
-            None,
-        )
-        if existing is None:
-            mod = gesture_spline.modifiers.new(name=node_name, type='NODES')
-            mod.node_group = ng
+        # 2. Read the evaluated curve data directly — evaluated_get() gives us the GN output
+        #    on the original Curve object, which preserves spline type and bezier handles.
+        depsgraph = context.evaluated_depsgraph_get()
+        eval_obj = plotting_spline.evaluated_get(depsgraph)
 
-        return {'FINISHED'}
+        # 3. Copy splines with full bezier handle data into the gesture spline
+        gesture_spline.data.splines.clear()
+        for src in eval_obj.data.splines:
+            dst = gesture_spline.data.splines.new(type=src.type)
+            if src.type == 'BEZIER':
+                dst.bezier_points.add(len(src.bezier_points) - 1)
+                for sp, dp in zip(src.bezier_points, dst.bezier_points):
+                    dp.co = sp.co
+                    dp.handle_left = sp.handle_left
+                    dp.handle_right = sp.handle_right
+                    dp.handle_left_type = sp.handle_left_type
+                    dp.handle_right_type = sp.handle_right_type
+                    dp.radius = sp.radius
+                    dp.tilt = sp.tilt
+            else:
+                dst.points.add(len(src.points) - 1)
+                for sp, dp in zip(src.points, dst.points):
+                    dp.co = sp.co
+                    dp.radius = sp.radius
+                    dp.tilt = sp.tilt
+                    dp.weight = sp.weight
+            dst.use_cyclic_u = src.use_cyclic_u
+            dst.resolution_u = src.resolution_u
+            if src.type == 'NURBS':
+                dst.order_u = src.order_u
+                dst.use_endpoint_u = src.use_endpoint_u
+
+        # 4. Turn the convert toggle back off
+        plotting_mod[convert_socket_id] = False
+        plotting_spline.update_tag()
+
+        # 8. Re-enter edit mode on the gesture spline so the loaded shape is immediately editable
+        return _enter_spline_edit_mode(self, context, mod_props, chain, arm_obj, 'EDIT')
 
 
 # ── Visibility ────────────────────────────────────────────────────────────────

@@ -154,8 +154,9 @@ def _ensure_gp_layer(arm, chain):
 def _sort_gp_layers(mod_props, chains):
     """Reorder GP layers to match chain list order visually.
 
-    In Blender 5.x GP3: data[0] = visual bottom, data[-1] = visual top.
-    So chains[0] must land at data[N-1], chains[1] at data[N-2], etc.
+    In Blender 5.x GP3: data[0] = visual bottom, data[N-1] = visual top.
+    GN processes layers from data[0] first (slots 0-4), then data[1] (slots 5-9), etc.
+    So chains[0] must land at data[0], chains[1] at data[1], to match sample_index = i + chain_idx*5.
     Uses insertion sort with 'DOWN' (decrease index) / 'UP' (increase index).
     Only touches layers that belong to a chain; orphan layers are left untouched.
     """
@@ -165,12 +166,11 @@ def _sort_gp_layers(mod_props, chains):
     if not hasattr(gp_data, 'layers'):
         return
 
-    n_chains = len(chains)
     for chain_idx, chain in enumerate(chains):
         if not chain.part_name:
             continue
-        # chains[0] → data[N-1] (visual top), chains[1] → data[N-2], …
-        target_idx = n_chains - 1 - chain_idx
+        # chains[0] → data[0] (GN processes first → slots 0-4), chains[1] → data[1], …
+        target_idx = chain_idx
         current_idx = next((i for i, l in enumerate(gp_data.layers) if l.name == chain.part_name), None)
         if current_idx is None:
             continue

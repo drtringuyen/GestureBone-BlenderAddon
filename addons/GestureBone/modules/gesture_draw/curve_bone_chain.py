@@ -1,9 +1,9 @@
 import bpy
 from bpy.props import (
-    StringProperty, PointerProperty, BoolProperty,
-    IntProperty, CollectionProperty, EnumProperty,
+    StringProperty, BoolProperty,
+    IntProperty, CollectionProperty, EnumProperty, PointerProperty,
 )
-from .utils import _resize_collection, _ensure_chain_objects, _ensure_gp_layer
+from .utils import _resize_collection, _ensure_chain_objects
 
 
 # ── Mode → bone-count mappings ─────────────────────────────────────────────────
@@ -44,19 +44,6 @@ def _bone_search(self, context, edit_text):
     return []
 
 
-def _layer_search(self, context, edit_text):
-    arm = context.active_object if context and context.active_object and context.active_object.type == 'ARMATURE' else None
-    if arm is None:
-        arm = getattr(getattr(context.scene, 'gesturebone_props', None), 'current_armature', None)
-    if arm:
-        mod_props = getattr(arm, 'gesturebone_gesture_draw_props', None)
-        if mod_props and mod_props.part_gp:
-            gp_data = mod_props.part_gp.data
-            if hasattr(gp_data, 'layers'):
-                return [l.name for l in gp_data.layers if edit_text.lower() in l.name.lower()]
-    return []
-
-
 # ── Update callbacks ───────────────────────────────────────────────────────────
 
 def _on_part_name_update(self, context):
@@ -68,12 +55,6 @@ def _on_part_name_update(self, context):
     else:
         arm = getattr(getattr(context.scene, 'gesturebone_props', None), 'current_armature', None)
     _ensure_chain_objects(arm, self, context)
-    _arm_ref = arm
-    _chain_ref = self
-    def _deferred_layer():
-        _ensure_gp_layer(_arm_ref, _chain_ref)
-        return None
-    bpy.app.timers.register(_deferred_layer, first_interval=0.0)
 
 
 def _on_control_mode_update(self, context):
@@ -97,8 +78,6 @@ class GESTUREBONE_PG_BoneName(bpy.types.PropertyGroup):
 class GESTUREBONE_PG_CurveBoneChain(bpy.types.PropertyGroup):
     # ── Core identity ──────────────────────────────────────────────────────────
     part_name: StringProperty(name="Name", default="Chain", update=_on_part_name_update)
-    part_layer: StringProperty(name="Layer", search=_layer_search)
-    part_material: PointerProperty(name="Material", type=bpy.types.Material)
     active_tool: EnumProperty(
         name="Active Tool",
         items=[('DRAW', 'Draw', ''), ('EDIT', 'Edit', '')],
@@ -156,7 +135,6 @@ class GESTUREBONE_PG_CurveBoneChain(bpy.types.PropertyGroup):
     prev_mode: StringProperty(default="OBJECT")
 
     last_baked_frame: IntProperty(name="Last Baked Frame", default=-1)
-    stroke_count_cache: IntProperty(name="Stroke Count Cache", default=0)
     drawing_frame: IntProperty(name="Drawing Frame", default=-1)
 
 

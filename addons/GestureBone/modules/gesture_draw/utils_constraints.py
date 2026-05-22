@@ -1,7 +1,7 @@
 import bpy
 from .utils_context import _bone_names
 
-_CONSTRAINT_NAME = "GP_copy"
+_CONSTRAINT_NAME = "Gesture_copy"
 _CONSTRAINT_TYPE = "GEOMETRY_ATTRIBUTE"
 
 

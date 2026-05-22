@@ -1,10 +1,10 @@
 import bpy
 
 
-def _chain_is_ready(mod_props, chain):
+def _chain_is_ready(chain):
     has_bone = any(entry.bone for entry in chain.part_control_bones)
     has_gesture_spline = chain.part_gesture_spline is not None
-    return mod_props.part_gp is not None and chain.is_bound and has_bone and has_gesture_spline
+    return chain.is_bound and has_bone and has_gesture_spline
 
 
 def _active_arm(context):
@@ -13,7 +13,6 @@ def _active_arm(context):
         return obj
     fallback = context.scene.gesturebone_props.current_armature
     return fallback if fallback and fallback.type == 'ARMATURE' else None
-
 
 
 class GESTUREBONE_PT_GestureDraw(bpy.types.Panel):
@@ -55,15 +54,12 @@ class GESTUREBONE_PT_GestureDrawBinding(bpy.types.Panel):
             layout.label(text="Properties not initialized", icon='ERROR')
             return
 
-        gp_row = layout.row(align=True)
-        gp_row.prop(mod_props, "part_gp", text="GP", icon='GREASEPENCIL')
-
         row = layout.row(align=True)
         row.operator("gesturebone.add_chain", icon='ADD', text="Add Chain")
         row.operator("gesturebone.refresh_all_chains", icon='FILE_REFRESH', text="")
 
         for i, chain in enumerate(mod_props.chains):
-            ready = _chain_is_ready(mod_props, chain)
+            ready = _chain_is_ready(chain)
             box = layout.box()
 
             # ── Header row: collapse | status | name | ↑↓ | bind ───────────
@@ -102,10 +98,6 @@ class GESTUREBONE_PT_GestureDrawBinding(bpy.types.Panel):
 
             # ── Body (only when expanded) ───────────────────────────────────
             if chain.bones_expanded:
-                # Layer row (no material)
-                lm_row = box.row(align=True)
-                lm_row.prop(chain, "part_layer", text="", icon='RENDERLAYERS')
-
                 col = box.column(align=True)
 
                 # Gesture spline + control mode enum on same row
@@ -157,17 +149,6 @@ class GESTUREBONE_PT_GestureDrawGestures(bpy.types.Panel):
         if mod_props is None:
             return
 
-        # ── Top row: Pose↔GP toggle + Bake All + Delete All ─────────────────
-        on_arm = arm is not None and context.view_layer.objects.active == arm
-        top_row = layout.row(align=True)
-        top_row.operator(
-            "gesturebone.toggle_pose_gp",
-            text="Edit Pose" if not on_arm else "Frame Gesture",
-            icon='ARMATURE_DATA' if not on_arm else 'GP_SELECT_BETWEEN_STROKES',
-        )
-        top_row.operator("gesturebone.bake_all_chains", text="Bake All", icon='FILE_REFRESH')
-        top_row.operator("gesturebone.delete_all_baked_frames", text="", icon='TRASH')
-
         if not mod_props.chains:
             layout.label(text="No chains — add in Binding", icon='INFO')
             return
@@ -189,23 +170,17 @@ class GESTUREBONE_PT_GestureDrawGestures(bpy.types.Panel):
             )
             tool_op.chain_index = i
 
-            # Apply to bone: exit edit → bake GP → key bones
+            # Apply to bone: exit edit → key bones from constraint
             op = row.operator("gesturebone.apply_to_bone", text="", icon='SORT_ASC')
             op.chain_index = i
 
-            # Load from bone: select gesture spline, ensure GN modifier
-            op = row.operator("gesturebone.load_from_bone", text="", icon='SORT_DESC')
-            op.chain_index = i
-
-            # Delete current frame keys + strokes
+            # Delete current frame keys
             op = row.operator("gesturebone.delete_baked_frames", text="", icon='KEY_DEHLT')
             op.chain_index = i
 
 
 _CHAIN_FIELDS = [
     ("part_name",                "Name"),
-    ("part_layer",               "Layer"),
-    ("part_material",            "Material"),
     ("part_gesture_spline",      "Gesture Spline"),
     ("part_control_mode",        "Control Mode"),
     ("part_control_point_count", "Control Count (derived)"),
@@ -221,7 +196,6 @@ _CHAIN_FIELDS = [
     ("prev_active_object",       "Prev Active Object"),
     ("prev_mode",                "Prev Mode"),
     ("last_baked_frame",         "Last Baked Frame"),
-    ("stroke_count_cache",       "Stroke Count Cache"),
     ("drawing_frame",            "Drawing Frame"),
 ]
 
@@ -257,17 +231,6 @@ class GESTUREBONE_PT_GestureDrawDebug(bpy.types.Panel):
         if not mod_props.chains:
             layout.label(text="No chains", icon='INFO')
             return
-
-        layout.operator("gesturebone.debug_constraint_state", icon='CONSOLE')
-
-        if gp_obj := getattr(mod_props, 'part_gp', None):
-            col = layout.column(align=True)
-            col.label(text="GP layers (data[0]=bottom, data[N-1]=top):")
-            n = len(gp_obj.data.layers)
-            for i, l in enumerate(gp_obj.data.layers):
-                visual_pos = n - 1 - i  # 0 = visual top
-                active_tag = " ← active" if l == gp_obj.data.layers.active else ""
-                col.label(text=f"  visual[{visual_pos}] data[{i}] '{l.name}'{active_tag}", icon='RENDERLAYERS')
 
         for i, chain in enumerate(mod_props.chains):
             box = layout.box()

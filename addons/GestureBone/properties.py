@@ -16,10 +16,10 @@ class GESTUREBONEProperties(bpy.types.PropertyGroup):
         type=bpy.types.Object,
         poll=lambda self, obj: obj.type == 'ARMATURE',
     )
-    current_gp: PointerProperty(
-        name="Current GP",
+    current_gestureSpline: PointerProperty(
+        name="Current Gesture Spline",
         type=bpy.types.Object,
-        poll=lambda self, obj: obj.type == 'GREASEPENCIL',
+        poll=lambda self, obj: obj.type == 'CURVE',
     )
 
 

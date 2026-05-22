@@ -91,7 +91,7 @@ class GESTUREBONE_PT_MainPanel(bpy.types.Panel):
             col = layout.column(align=True)
             col.label(text="Overrides:", text_ctxt="extra-info-label")
             col.prop(props, "current_armature", text="Armature")
-            col.prop(props, "current_gp", text="GP")
+            col.prop(props, "current_gestureSpline", text="Gesture Spline")
 
 
 def register():

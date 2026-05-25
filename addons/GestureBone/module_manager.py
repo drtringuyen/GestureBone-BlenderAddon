@@ -7,6 +7,7 @@ _LOADED = {}
 # Add new modules here — panels.py iterates this list automatically
 ALL_MODULES = [
     {"name": "gesture_draw", "op": "gesturebone.toggle_gesture_draw", "icon": "GREASEPENCIL"},
+    {"name": "rig_generation", "op": "gesturebone.toggle_rig_generation", "icon": "ARMATURE_DATA"},
 ]
 
 

@@ -105,6 +105,30 @@ class GESTUREBONE_OT_ToggleConstraintActive(bpy.types.Operator):
         return {'FINISHED'}
 
 
+# ── Context helpers ────────────────────────────────────────────────────────────
+
+def _view3d_ctx(context):
+    """Return temp_override kwargs for a VIEW_3D window/area/region, or {} if none found.
+
+    Needed when operators run from a popup dialog whose context is not VIEW_3D
+    (e.g. ConfirmExitDrawing), so that mode_set / tool_set_by_id can poll correctly.
+    """
+    for window in context.window_manager.windows:
+        for area in window.screen.areas:
+            if area.type != 'VIEW_3D':
+                continue
+            for region in area.regions:
+                if region.type == 'WINDOW':
+                    return {'window': window, 'area': area, 'region': region}
+    return {}
+
+
+def _deselect_all(context):
+    """Deselect every object in the view layer without needing VIEW_3D context."""
+    for obj in context.view_layer.objects:
+        obj.select_set(False)
+
+
 # ── Shared enter-edit-mode helper ─────────────────────────────────────────────
 
 def _enter_spline_edit_mode(op, context, mod_props, chain, arm_obj, tool):
@@ -119,10 +143,6 @@ def _enter_spline_edit_mode(op, context, mod_props, chain, arm_obj, tool):
         if other != chain and other.is_drawing:
             other.is_drawing = False
             other.drawing_frame = -1
-
-    if context.active_object:
-        chain.prev_active_object = context.active_object.name
-        chain.prev_mode = context.active_object.mode
 
     if context.object and context.object.mode != 'OBJECT':
         bpy.ops.object.mode_set(mode='OBJECT')
@@ -287,14 +307,17 @@ class GESTUREBONE_OT_ConfirmExitDrawing(bpy.types.Operator):
         if chain is None:
             return {'CANCELLED'}
 
+        ov = _view3d_ctx(context)  # override for ops that poll VIEW_3D
+
         if self.action == 'STOP':
             chain.is_drawing = False
             chain.drawing_frame = -1
             if arm_obj:
-                bpy.ops.object.select_all(action='DESELECT')
+                _deselect_all(context)
                 arm_obj.select_set(True)
                 context.view_layer.objects.active = arm_obj
-                bpy.ops.object.mode_set(mode='POSE')
+                with context.temp_override(**ov):
+                    bpy.ops.object.mode_set(mode='POSE')
         else:
             gesture_spline = chain.part_gesture_spline
             if not gesture_spline:
@@ -303,17 +326,19 @@ class GESTUREBONE_OT_ConfirmExitDrawing(bpy.types.Operator):
                 return {'CANCELLED'}
             _ensure_object_collections_visible(context.view_layer, gesture_spline)
             gesture_spline.hide_set(False)
-            if context.object and context.object.mode != 'OBJECT':
-                bpy.ops.object.mode_set(mode='OBJECT')
+            with context.temp_override(**ov):
+                if context.object and context.object.mode != 'OBJECT':
+                    bpy.ops.object.mode_set(mode='OBJECT')
             # DRAW: clear the spline so the user starts fresh; EDIT: preserve undo state
             if self.action == 'DRAW' and gesture_spline.data.splines:
                 gesture_spline.data.splines.clear()
-            bpy.ops.object.select_all(action='DESELECT')
+            _deselect_all(context)
             gesture_spline.select_set(True)
             context.view_layer.objects.active = gesture_spline
-            bpy.ops.object.mode_set(mode='EDIT')
-            tool_id = "builtin.draw" if self.action == 'DRAW' else "builtin.select_box"
-            bpy.ops.wm.tool_set_by_id(name=tool_id, space_type='VIEW_3D')
+            with context.temp_override(**ov):
+                bpy.ops.object.mode_set(mode='EDIT')
+                tool_id = "builtin.draw" if self.action == 'DRAW' else "builtin.select_box"
+                bpy.ops.wm.tool_set_by_id(name=tool_id, space_type='VIEW_3D')
             chain.active_tool = 'DRAW' if self.action == 'DRAW' else 'EDIT'
             # is_drawing stays True; drawing_frame unchanged — session continues
 
@@ -336,15 +361,18 @@ class GESTUREBONE_OT_ConfirmExitDrawing(bpy.types.Operator):
             return
         _ensure_object_collections_visible(context.view_layer, gesture_spline)
         gesture_spline.hide_set(False)
-        if context.object and context.object.mode != 'OBJECT':
-            bpy.ops.object.mode_set(mode='OBJECT')
+        ov = _view3d_ctx(context)
+        with context.temp_override(**ov):
+            if context.object and context.object.mode != 'OBJECT':
+                bpy.ops.object.mode_set(mode='OBJECT')
         if gesture_spline.data.splines:
             gesture_spline.data.splines.clear()
-        bpy.ops.object.select_all(action='DESELECT')
+        _deselect_all(context)
         gesture_spline.select_set(True)
         context.view_layer.objects.active = gesture_spline
-        bpy.ops.object.mode_set(mode='EDIT')
-        bpy.ops.wm.tool_set_by_id(name="builtin.draw", space_type='VIEW_3D')
+        with context.temp_override(**ov):
+            bpy.ops.object.mode_set(mode='EDIT')
+            bpy.ops.wm.tool_set_by_id(name="builtin.draw", space_type='VIEW_3D')
         chain.active_tool = 'DRAW'
         # is_drawing stays True; drawing_frame unchanged — session continues
 

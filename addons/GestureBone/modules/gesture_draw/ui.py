@@ -1,4 +1,6 @@
 import bpy
+from .curve_bone_chain import _ctrl_bone_indices
+from .utils import _constraints_are_muted, _constraints_exist
 
 
 def _chain_is_ready(chain):
@@ -54,8 +56,10 @@ class GESTUREBONE_PT_GestureDrawBinding(bpy.types.Panel):
             layout.label(text="Properties not initialized", icon='ERROR')
             return
 
+        debug_mode = getattr(getattr(context.scene, 'gesturebone_props', None), 'debug_mode', False)
+
         row = layout.row(align=True)
-        row.operator("gesturebone.add_chain", icon='ADD', text="Add Chain")
+        row.operator("gesturebone.load_chains_from_meta_rig", icon='FILE_ALIAS', text="Load Chain From Meta Rig")
         row.operator("gesturebone.refresh_all_chains", icon='FILE_REFRESH', text="")
 
         for i, chain in enumerate(mod_props.chains):
@@ -118,10 +122,30 @@ class GESTUREBONE_PT_GestureDrawBinding(bpy.types.Panel):
                 op = ctrl_header.operator("gesturebone.refresh_chain", text="", icon='FILE_REFRESH')
                 op.chain_index = i
                 if chain.control_bones_expanded:
+                    indices = _ctrl_bone_indices(chain.part_control_point_count)
                     for j, entry in enumerate(chain.part_control_bones):
-                        col.prop(entry, "bone", text=f"  Bone {j + 1}")
+                        idx = indices[j] if j < len(indices) else j
+                        col.prop(entry, "bone", text=f"  Bone {idx}")
 
-                # Plotting spline and bones hidden for now
+                # ── Plotting (debug mode only) ──────────────────────────────
+                if debug_mode:
+                    col.separator()
+                    plot_row = col.row(align=True)
+                    plot_row.prop(chain, "part_plotting_spline", text="Plotting Spline", icon='CURVE_BEZCURVE')
+                    pm_sub = plot_row.row(align=True)
+                    pm_sub.scale_x = 0.65
+                    pm_sub.prop(chain, "part_plotting_mode", text="")
+
+                    plot_header = col.row(align=True)
+                    plot_header.prop(
+                        chain, "plotting_bones_expanded",
+                        text="Plotting Bones",
+                        icon='TRIA_DOWN' if chain.plotting_bones_expanded else 'TRIA_RIGHT',
+                        emboss=False,
+                    )
+                    if chain.plotting_bones_expanded:
+                        for j, entry in enumerate(chain.part_plotting_bones):
+                            col.prop(entry, "bone", text=f"  Bone {j}")
 
 
 class GESTUREBONE_PT_GestureDrawGestures(bpy.types.Panel):
@@ -153,11 +177,15 @@ class GESTUREBONE_PT_GestureDrawGestures(bpy.types.Panel):
             layout.label(text="No chains — add in Binding", icon='INFO')
             return
 
-        # ── Per-chain rows ───────────────────────────────────────────────────
+        # ── Per-chain blocks ─────────────────────────────────────────────────
         for i, chain in enumerate(mod_props.chains):
-            row = layout.row(align=True)
+            box = layout.box()
+            col = box.column(align=True)
 
-            # Wide merged button — chain name label + draw/edit toggle
+            # Row 1 (double height): draw/edit toggle | apply | delete keys
+            row = col.row(align=True)
+            row.scale_y = 2.0
+
             tool_icon = 'CON_SPLINEIK' if (chain.is_drawing and chain.active_tool == 'EDIT') else 'GREASEPENCIL'
             name_sub = row.row(align=True)
             name_sub.scale_x = 4.0
@@ -170,33 +198,37 @@ class GESTUREBONE_PT_GestureDrawGestures(bpy.types.Panel):
             )
             tool_op.chain_index = i
 
-            # Apply to bone: exit edit → key bones from constraint
             op = row.operator("gesturebone.apply_to_bone", text="", icon='SORT_ASC')
             op.chain_index = i
 
-            # Delete current frame keys
             op = row.operator("gesturebone.delete_baked_frames", text="", icon='KEY_DEHLT')
             op.chain_index = i
 
+            # Row 2: Bone Handle Smoothness | unmute constraint toggle (live preview)
+            row2 = col.row(align=True)
+            row2.prop(chain, "bone_handle_smoothness", text="", slider=True)
+
+            has_con  = arm is not None and _constraints_exist(arm, chain)
+            is_muted = _constraints_are_muted(arm, chain) if has_con else True
+            con_op   = row2.operator("gesturebone.toggle_constraint_active",
+                                    text="", icon='HANDLE_ALIGNED', depress=not is_muted)
+            con_op.chain_index = i
+
 
 _CHAIN_FIELDS = [
-    ("part_name",                "Name"),
-    ("part_gesture_spline",      "Gesture Spline"),
-    ("part_control_mode",        "Control Mode"),
-    ("part_control_point_count", "Control Count (derived)"),
-    ("part_plotting_spline",     "Plotting Spline"),
-    ("part_plotting_mode",       "Plotting Mode"),
-    ("part_plotting_point_count","Plotting Count (derived)"),
-    ("is_bound",                 "Is Bound"),
-    ("is_drawing",               "Is Drawing"),
-    ("active_tool",              "Active Tool"),
-    ("bones_expanded",           "Bones Expanded"),
-    ("control_bones_expanded",   "Ctrl Bones Expanded"),
-    ("plotting_bones_expanded",  "Plot Bones Expanded"),
-    ("prev_active_object",       "Prev Active Object"),
-    ("prev_mode",                "Prev Mode"),
-    ("last_baked_frame",         "Last Baked Frame"),
-    ("drawing_frame",            "Drawing Frame"),
+    ("part_name",                 "Name"),
+    ("part_gesture_spline",       "Gesture Spline"),
+    ("part_control_mode",         "Control Mode"),
+    ("part_control_point_count",  "Ctrl Points"),
+    ("bone_handle_smoothness",    "Handle Smoothness"),
+    ("part_plotting_spline",      "Plotting Spline"),
+    ("part_plotting_mode",        "Plotting Mode"),
+    ("part_plotting_point_count", "Plot Points"),
+    ("is_bound",                  "Is Bound"),
+    ("is_drawing",                "Is Drawing"),
+    ("active_tool",               "Active Tool"),
+    ("last_baked_frame",          "Last Baked Frame"),
+    ("drawing_frame",             "Drawing Frame"),
 ]
 
 

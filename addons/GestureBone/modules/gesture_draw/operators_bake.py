@@ -16,6 +16,26 @@ def reset_exit_confirm_pending():
     _exit_confirm_pending = False
 
 
+def clear_all_drawing_state():
+    """Clear is_drawing on every chain of every armature in bpy.data.
+
+    Call this whenever the active armature is switched (e.g. LoadChainsFromMetaRig)
+    so stale is_drawing flags on old/template armatures can never trigger the popup.
+    """
+    global _exit_confirm_pending
+    _exit_confirm_pending = False
+    for obj in bpy.data.objects:
+        if obj.type != 'ARMATURE':
+            continue
+        sdp = getattr(obj, 'gesturebone_gesture_draw_props', None)
+        if sdp is None:
+            continue
+        for chain in sdp.chains:
+            if chain.is_drawing:
+                chain.is_drawing   = False
+                chain.drawing_frame = -1
+
+
 def _trigger_exit_confirm():
     """Deferred timer: invoke the confirmation popup in a safe context."""
     global _exit_confirm_pending
@@ -37,6 +57,10 @@ def _check_drawing_state(scene, depsgraph):
     deferred timer so the user can choose: stop drawing, re-enter edit, or
     re-enter draw. The ApplyToBone operator sets is_drawing=False BEFORE
     calling mode_set, so normal apply does not trigger this handler.
+
+    Only the armature pointed to by scene.gesturebone_props.current_armature
+    is monitored. Stale is_drawing flags on template or other armatures in
+    the scene are intentionally ignored to prevent spurious popup loops.
     """
     global _exit_confirm_pending
     if _exit_confirm_pending:
@@ -46,26 +70,32 @@ def _check_drawing_state(scene, depsgraph):
     if ctx is None:
         return
 
-    active = getattr(ctx, 'active_object', None)
-    mode = getattr(ctx, 'mode', 'OBJECT')
+    # ── Only watch the armature the addon is currently working with ───────────
+    scene_gp = getattr(scene, 'gesturebone_props', None)
+    if scene_gp is None:
+        return
+    arm = scene_gp.current_armature
+    if arm is None or arm.type != 'ARMATURE':
+        return
 
-    for obj in scene.objects:
-        if obj.type != 'ARMATURE':
+    mod_props = getattr(arm, 'gesturebone_gesture_draw_props', None)
+    if mod_props is None:
+        return
+
+    active = getattr(ctx, 'active_object', None)
+    mode   = getattr(ctx, 'mode', 'OBJECT')
+
+    for chain in mod_props.chains:
+        if not chain.is_drawing:
             continue
-        mod_props = getattr(obj, 'gesturebone_gesture_draw_props', None)
-        if mod_props is None:
+        spline = chain.part_gesture_spline
+        if spline is None:
             continue
-        for chain in mod_props.chains:
-            if not chain.is_drawing:
-                continue
-            spline = chain.part_gesture_spline
-            if spline is None:
-                continue
-            in_edit = (active is spline and mode == 'EDIT_CURVE')
-            if not in_edit:
-                _exit_confirm_pending = True
-                bpy.app.timers.register(_trigger_exit_confirm, first_interval=0.0)
-                return  # handle one chain at a time
+        in_edit = (active is spline and mode == 'EDIT_CURVE')
+        if not in_edit:
+            _exit_confirm_pending = True
+            bpy.app.timers.register(_trigger_exit_confirm, first_interval=0.0)
+            return  # handle one chain at a time
 
 
 # ── Bone hierarchy helpers ─────────────────────────────────────────────────────

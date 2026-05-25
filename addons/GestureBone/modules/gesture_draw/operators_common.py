@@ -5,22 +5,153 @@ from .utils import (
     _ensure_chain_objects,
     _cleanup_orphan_splines,
     _refresh_bone_lists,
+    _resize_collection,
 )
+from .curve_bone_chain import CONTROL_MODE_COUNT, _ctrl_bone_indices
+
+_GN_GESTURE_NAME = "TOB-Gesture_drawing"
 
 
-class GESTUREBONE_OT_AddChain(bpy.types.Operator):
-    """Add a new CurveBoneChain entry"""
-    bl_idname = "gesturebone.add_chain"
-    bl_label = "Add Chain"
+def _sync_gesture_spline_gn(chain):
+    """Ensure the gesture spline has the TOB-Gesture_drawing modifier and
+    its sockets match the chain's current settings (live after load/refresh)."""
+    spline = chain.part_gesture_spline
+    if spline is None:
+        return
+    ng = bpy.data.node_groups.get(_GN_GESTURE_NAME)
+    if ng is None:
+        return
+    # Find or create the modifier
+    mod = next((m for m in spline.modifiers if m.type == 'NODES' and m.node_group == ng), None)
+    if mod is None:
+        mod = spline.modifiers.new(name="GeometryNodes", type='NODES')
+        mod.node_group = ng
+    # Sync sockets
+    mod["Socket_10"] = chain.part_control_point_count   # Control Point Count
+    mod["Socket_8"]  = 2                                 # Resample Precision
+    mod["Socket_6"]  = chain.bone_handle_smoothness      # Bone Handle Smoothness
+
+
+def _get_bones_in_collection(arm_data, coll_name):
+    """Return bone names assigned to a specific bone collection."""
+    bc = arm_data.collections.get(coll_name)
+    if not bc:
+        return []
+    try:
+        return [b.name for b in bc.bones]
+    except AttributeError:
+        result = []
+        for b in arm_data.bones:
+            if any(c.name == coll_name for c in getattr(b, 'collections', [])):
+                result.append(b.name)
+        return result
+
+
+
+class GESTUREBONE_OT_LoadChainsFromMetaRig(bpy.types.Operator):
+    """Clear chains and rebuild one per MetaBone, linking existing splines and control bones"""
+    bl_idname = "gesturebone.load_chains_from_meta_rig"
+    bl_label  = "Load Chain From Meta Rig"
 
     def execute(self, context):
-        mod_props = _mod_props(context)
-        if mod_props is None:
-            self.report({'ERROR'}, "Select an armature first")
+        # Access rig_generation scene props without importing from sibling module
+        rig_gen = getattr(context.scene, 'gesturebone_rig_generation_props', None)
+        if rig_gen is None:
+            self.report({'ERROR'}, "Rig Generation module not active — enable it first")
             return {'CANCELLED'}
-        chain = mod_props.chains.add()
-        chain.part_name = f"Chain {len(mod_props.chains)}"
-        mod_props.active_chain_index = len(mod_props.chains) - 1
+
+        meta_rig_name  = rig_gen.meta_rig
+        meta_coll_name = rig_gen.meta_collection
+
+        meta_arm = bpy.data.objects.get(meta_rig_name)
+        if not meta_arm or meta_arm.type != 'ARMATURE':
+            self.report({'ERROR'}, f"MetaRig '{meta_rig_name}' not found")
+            return {'CANCELLED'}
+
+        bone_names = _get_bones_in_collection(meta_arm.data, meta_coll_name)
+        if not bone_names:
+            self.report({'ERROR'}, f"No bones found in collection '{meta_coll_name}'")
+            return {'CANCELLED'}
+
+        # Always target the merged .Gesture armature — redirect current_armature to it
+        gesture_arm_name = f"{meta_rig_name}.Gesture"
+        gesture_arm      = bpy.data.objects.get(gesture_arm_name)
+
+        if gesture_arm and gesture_arm.type == 'ARMATURE':
+            # Wipe stale is_drawing flags on ALL armatures before switching — prevents
+            # the depsgraph handler from firing spurious popup loops after the switch.
+            from . import operators_bake as _ob
+            _ob.clear_all_drawing_state()
+
+            # Redirect the scene pointer so all subsequent operators use the right armature
+            context.scene.gesturebone_props.current_armature = gesture_arm
+            mod_props = gesture_arm.gesturebone_gesture_draw_props
+        else:
+            # Gesture armature not generated yet — fall back to whatever is active
+            mod_props = _mod_props(context)
+            gesture_arm = None
+
+        if mod_props is None:
+            self.report({'ERROR'}, "No armature found — select one or generate the rig first")
+            return {'CANCELLED'}
+
+        # Clear existing chains
+        mod_props.chains.clear()
+        mod_props.active_chain_index = 0
+
+        built = 0
+        for bone_name in bone_names:
+            chain = mod_props.chains.add()
+            chain.part_name = bone_name
+
+            # Sync Control Mode from rig_generation bone_settings if available
+            bone_settings = rig_gen.bone_settings.get(bone_name)
+            if bone_settings:
+                chain.part_control_mode        = bone_settings.control_mode
+                chain.part_control_point_count = CONTROL_MODE_COUNT.get(bone_settings.control_mode, 5)
+            _resize_collection(chain.part_control_bones,  chain.part_control_point_count)
+            _resize_collection(chain.part_plotting_bones, chain.part_plotting_point_count)
+
+            # Link GestureSpline — prefer merged naming (RigName.Gesture_Bone_GestureSpline)
+            # then fall back to original WIP naming (RigName-Bone.GestureSpline)
+            g_obj = (
+                bpy.data.objects.get(f"{gesture_arm_name}_{bone_name}_GestureSpline")
+                or bpy.data.objects.get(f"{meta_rig_name}-{bone_name}.GestureSpline")
+            )
+            if g_obj and g_obj.type == 'CURVE':
+                chain.part_gesture_spline = g_obj
+
+            # Link PlottingSpline — same preference order
+            p_obj = (
+                bpy.data.objects.get(f"{gesture_arm_name}_{bone_name}_PlottingSpline")
+                or bpy.data.objects.get(f"{meta_rig_name}-{bone_name}.PlottingSpline")
+            )
+            if p_obj and p_obj.type == 'CURVE':
+                chain.part_plotting_spline = p_obj
+
+            # Auto-populate control bones using the 0-based index convention:
+            # template keeps CTRL-{bone}_0…_4; PT_3 deletes _1,_3 → _0,_2,_4 remain;
+            # PT_2 keeps _0,_4; PT_5 keeps all five.
+            if gesture_arm:
+                indices = _ctrl_bone_indices(chain.part_control_point_count)
+                for i, entry in enumerate(chain.part_control_bones):
+                    if i < len(indices):
+                        ctrl_name = f"CTRL-{bone_name}_{indices[i]}"
+                        if gesture_arm.data.bones.get(ctrl_name):
+                            entry.bone = ctrl_name
+
+            built += 1
+
+        target_name = gesture_arm.name if gesture_arm else "current armature"
+
+        # Auto-create (or refresh) bone constraints; sync GN modifier for every chain
+        for i in range(len(mod_props.chains)):
+            chain_i = mod_props.chains[i]
+            if chain_i.part_gesture_spline:
+                bpy.ops.gesturebone.create_bone_constraints(chain_index=i)
+                _sync_gesture_spline_gn(chain_i)
+
+        self.report({'INFO'}, f"Loaded {built} chain(s) from '{meta_rig_name}' onto '{target_name}'")
         return {'FINISHED'}
 
 
@@ -110,19 +241,34 @@ class GESTUREBONE_OT_MoveChain(bpy.types.Operator):
 
 
 class GESTUREBONE_OT_RefreshChain(bpy.types.Operator):
-    """Resize bone lists, auto-fill from armature, and ensure spline objects exist"""
+    """Resize bone lists, auto-fill control bones from .Gesture armature, and ensure spline objects exist"""
     bl_idname = "gesturebone.refresh_chain"
     bl_label = "Refresh Chain"
     chain_index: IntProperty()
 
     def execute(self, context):
-        arm = _arm(context)
+        arm       = _arm(context)
         mod_props = _mod_props(context)
         if mod_props is None or not (0 <= self.chain_index < len(mod_props.chains)):
             return {'CANCELLED'}
         chain = mod_props.chains[self.chain_index]
         _ensure_chain_objects(arm, chain, context)
         _refresh_bone_lists(chain)
+
+        # Auto-populate control bones from the generated .Gesture armature
+        # Uses the 0-based index convention (_0…_4); PT_3 keeps _0,_2,_4 etc.
+        rig_gen = getattr(context.scene, 'gesturebone_rig_generation_props', None)
+        if rig_gen:
+            gesture_arm_name = f"{rig_gen.meta_rig}.Gesture"
+            gesture_arm = bpy.data.objects.get(gesture_arm_name)
+            if gesture_arm and gesture_arm.type == 'ARMATURE':
+                part_name = chain.part_name
+                indices   = _ctrl_bone_indices(chain.part_control_point_count)
+                for i, entry in enumerate(chain.part_control_bones):
+                    if i < len(indices):
+                        ctrl_name = f"CTRL-{part_name}_{indices[i]}"
+                        entry.bone = ctrl_name if gesture_arm.data.bones.get(ctrl_name) else entry.bone
+
         return {'FINISHED'}
 
 
@@ -141,11 +287,19 @@ class GESTUREBONE_OT_RefreshAllChains(bpy.types.Operator):
             _ensure_chain_objects(arm, chain, context)
             _refresh_bone_lists(chain)
         _cleanup_orphan_splines(arm, mod_props, context.scene)
+
+        # Auto-create (or refresh) bone constraints; sync GN modifier for every chain
+        for i in range(len(mod_props.chains)):
+            chain_i = mod_props.chains[i]
+            if chain_i.part_gesture_spline:
+                bpy.ops.gesturebone.create_bone_constraints(chain_index=i)
+                _sync_gesture_spline_gn(chain_i)
+
         return {'FINISHED'}
 
 
 def register():
-    bpy.utils.register_class(GESTUREBONE_OT_AddChain)
+    bpy.utils.register_class(GESTUREBONE_OT_LoadChainsFromMetaRig)
     bpy.utils.register_class(GESTUREBONE_OT_RemoveChain)
     bpy.utils.register_class(GESTUREBONE_OT_MoveChain)
     bpy.utils.register_class(GESTUREBONE_OT_RefreshChain)
@@ -157,4 +311,4 @@ def unregister():
     bpy.utils.unregister_class(GESTUREBONE_OT_RefreshChain)
     bpy.utils.unregister_class(GESTUREBONE_OT_MoveChain)
     bpy.utils.unregister_class(GESTUREBONE_OT_RemoveChain)
-    bpy.utils.unregister_class(GESTUREBONE_OT_AddChain)
+    bpy.utils.unregister_class(GESTUREBONE_OT_LoadChainsFromMetaRig)

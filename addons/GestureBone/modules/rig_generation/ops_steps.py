@@ -489,11 +489,15 @@ class GESTUREBONE_OT_FinishMerging(bpy.types.Operator):
 
         wip = bpy.data.collections.get(props.wip_coll)
         if wip and target_colls:
-            splines_coll = _ensure_child_coll("Splines",    target_colls[0])
-            sample_coll  = _ensure_child_coll("SampleMesh", target_colls[0])
+            gesture_splines_coll  = _ensure_child_coll(f"{meta_name}.GestureSplines",  target_colls[0])
+            plotting_splines_coll = _ensure_child_coll(f"{meta_name}.PlottingSplines", target_colls[0])
+            sample_coll           = _ensure_child_coll("SampleMesh", target_colls[0])
             for obj in _all_objects(wip):
                 if obj.type == 'CURVE':
-                    _move_obj_to_coll(obj, splines_coll)
+                    if obj.name.endswith('.PlottingSpline'):
+                        _move_obj_to_coll(obj, plotting_splines_coll)
+                    else:
+                        _move_obj_to_coll(obj, gesture_splines_coll)
                 elif obj.type == 'MESH':
                     _move_obj_to_coll(obj, sample_coll)
             _delete_coll(wip)

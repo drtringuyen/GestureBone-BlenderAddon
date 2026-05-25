@@ -136,16 +136,6 @@ class GESTUREBONE_PT_GestureDrawBinding(bpy.types.Panel):
                     pm_sub.scale_x = 0.65
                     pm_sub.prop(chain, "part_plotting_mode", text="")
 
-                    plot_header = col.row(align=True)
-                    plot_header.prop(
-                        chain, "plotting_bones_expanded",
-                        text="Plotting Bones",
-                        icon='TRIA_DOWN' if chain.plotting_bones_expanded else 'TRIA_RIGHT',
-                        emboss=False,
-                    )
-                    if chain.plotting_bones_expanded:
-                        for j, entry in enumerate(chain.part_plotting_bones):
-                            col.prop(entry, "bone", text=f"  Bone {j}")
 
 
 class GESTUREBONE_PT_GestureDrawGestures(bpy.types.Panel):
@@ -206,6 +196,7 @@ class GESTUREBONE_PT_GestureDrawGestures(bpy.types.Panel):
 
             # Row 2: Bone Handle Smoothness | unmute constraint toggle (live preview)
             row2 = col.row(align=True)
+            row2.scale_y = 0.5
             row2.prop(chain, "bone_handle_smoothness", text="", slider=True)
 
             has_con  = arm is not None and _constraints_exist(arm, chain)
@@ -227,7 +218,6 @@ _CHAIN_FIELDS = [
     ("is_bound",                  "Is Bound"),
     ("is_drawing",                "Is Drawing"),
     ("active_tool",               "Active Tool"),
-    ("last_baked_frame",          "Last Baked Frame"),
     ("drawing_frame",             "Drawing Frame"),
 ]
 
@@ -272,9 +262,6 @@ class GESTUREBONE_PT_GestureDrawDebug(bpy.types.Panel):
                 col.prop(chain, attr, text=label)
             col.label(text=f"Control Bones ({len(chain.part_control_bones)})")
             for j, entry in enumerate(chain.part_control_bones):
-                col.prop(entry, "bone", text=f"  [{j}]")
-            col.label(text=f"Plotting Bones ({len(chain.part_plotting_bones)})")
-            for j, entry in enumerate(chain.part_plotting_bones):
                 col.prop(entry, "bone", text=f"  [{j}]")
 
 

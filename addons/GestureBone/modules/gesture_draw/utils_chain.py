@@ -48,54 +48,56 @@ def _move_object_to_collection(obj, target_coll):
 def _ensure_chain_objects(arm, chain, context):
     """Find or create gesture/plotting spline curve objects for this chain.
 
-    Sorts them into the <Armature>_Splines collection. Safe to call from update callbacks.
+    Sorts them into <MetaRig>.GestureSplines and <MetaRig>.PlottingSplines collections.
+    Safe to call from update callbacks.
     """
     if arm is None or not chain.part_name:
         return
-    arm_name = arm.name
+    arm_name  = arm.name
     part_name = chain.part_name
     scene = getattr(context, 'scene', None)
     if scene is None:
         return
 
-    arm_coll = _find_arm_collection(arm, scene)
-    splines_coll = _ensure_child_collection(f"{arm_name}_Splines", arm_coll)
+    # Strip ".Gesture" suffix to get the MetaRig base name
+    meta_name = arm_name[:-len(".Gesture")] if arm_name.endswith(".Gesture") else arm_name
 
-    gesture_name = f"{arm_name}_{part_name}_GestureSpline"
+    arm_coll      = _find_arm_collection(arm, scene)
+    gesture_coll  = _ensure_child_collection(f"{meta_name}.GestureSplines",  arm_coll)
+    plotting_coll = _ensure_child_collection(f"{meta_name}.PlottingSplines", arm_coll)
+
+    gesture_name = f"{meta_name}-{part_name}.GestureSpline"
     if gesture_name in bpy.data.objects:
         chain.part_gesture_spline = bpy.data.objects[gesture_name]
     elif not chain.part_gesture_spline:
         curve_data = bpy.data.curves.new(gesture_name, 'CURVE')
         curve_data.dimensions = '3D'
         obj = bpy.data.objects.new(gesture_name, curve_data)
-        splines_coll.objects.link(obj)
+        gesture_coll.objects.link(obj)
         chain.part_gesture_spline = obj
     if chain.part_gesture_spline:
-        _move_object_to_collection(chain.part_gesture_spline, splines_coll)
+        _move_object_to_collection(chain.part_gesture_spline, gesture_coll)
 
-    plotting_name = f"{arm_name}_{part_name}_PlottingSpline"
+    plotting_name = f"{meta_name}-{part_name}.PlottingSpline"
     if plotting_name in bpy.data.objects:
         chain.part_plotting_spline = bpy.data.objects[plotting_name]
     elif not chain.part_plotting_spline:
         curve_data = bpy.data.curves.new(plotting_name, 'CURVE')
         curve_data.dimensions = '3D'
         obj = bpy.data.objects.new(plotting_name, curve_data)
-        splines_coll.objects.link(obj)
+        plotting_coll.objects.link(obj)
         chain.part_plotting_spline = obj
     if chain.part_plotting_spline:
-        _move_object_to_collection(chain.part_plotting_spline, splines_coll)
+        _move_object_to_collection(chain.part_plotting_spline, plotting_coll)
 
 
 def _cleanup_orphan_splines(arm, mod_props, scene):
-    """Delete CURVE objects in the <arm>_Splines collection not referenced by any chain.
+    """Delete CURVE objects in the spline collections not referenced by any chain.
 
-    Only removes objects of type CURVE that live inside the managed collection and are
-    not assigned as part_gesture_spline or part_plotting_spline on any current chain.
+    Checks both <MetaRig>.GestureSplines and <MetaRig>.PlottingSplines.
     """
-    coll_name = f"{arm.name}_Splines"
-    splines_coll = bpy.data.collections.get(coll_name)
-    if splines_coll is None:
-        return
+    arm_name  = arm.name
+    meta_name = arm_name[:-len(".Gesture")] if arm_name.endswith(".Gesture") else arm_name
 
     active = set()
     for chain in mod_props.chains:
@@ -104,18 +106,21 @@ def _cleanup_orphan_splines(arm, mod_props, scene):
         if chain.part_plotting_spline:
             active.add(chain.part_plotting_spline.name)
 
-    for obj in list(splines_coll.objects):
-        if obj.type != 'CURVE':
+    for coll_name in (f"{meta_name}.GestureSplines", f"{meta_name}.PlottingSplines"):
+        splines_coll = bpy.data.collections.get(coll_name)
+        if splines_coll is None:
             continue
-        if obj.name not in active:
-            print(f"GestureBone: removing orphan spline '{obj.name}'")
-            try:
-                bpy.data.objects.remove(obj, do_unlink=True)
-            except Exception as e:
-                print(f"GestureBone: could not remove '{obj.name}': {e}")
+        for obj in list(splines_coll.objects):
+            if obj.type != 'CURVE':
+                continue
+            if obj.name not in active:
+                print(f"GestureBone: removing orphan spline '{obj.name}'")
+                try:
+                    bpy.data.objects.remove(obj, do_unlink=True)
+                except Exception as e:
+                    print(f"GestureBone: could not remove '{obj.name}': {e}")
 
 
 def _refresh_bone_lists(chain):
-    """Resize control/plotting bone collections to match their count fields."""
+    """Resize control bone collection to match the count field."""
     _resize_collection(chain.part_control_bones, chain.part_control_point_count)
-    _resize_collection(chain.part_plotting_bones, chain.part_plotting_point_count)

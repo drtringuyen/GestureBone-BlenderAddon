@@ -61,4 +61,3 @@ def _apply_and_key_data(arm_obj, chain, frame, depsgraph):
         else:
             pose_bone.keyframe_insert(data_path="rotation_euler", frame=frame)
         pose_bone.keyframe_insert(data_path="scale", frame=frame)
-    chain.last_baked_frame = max(chain.last_baked_frame, frame)

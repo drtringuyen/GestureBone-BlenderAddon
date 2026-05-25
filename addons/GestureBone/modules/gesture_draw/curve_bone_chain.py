@@ -101,7 +101,6 @@ def _on_control_mode_update(self, context):
 def _on_plotting_mode_update(self, context):
     count = PLOTTING_MODE_COUNT.get(self.part_plotting_mode, 10)
     self.part_plotting_point_count = count
-    _resize_collection(self.part_plotting_bones, count)
 
 
 def _on_handle_smoothness_update(self, context):
@@ -152,8 +151,8 @@ class GESTUREBONE_PG_CurveBoneChain(bpy.types.PropertyGroup):
         name="Bone Handle Smoothness",
         description="Drives the 'Bone Handle Smoothness' socket on the gesture spline's TOB-Gesture_drawing modifier",
         default=1.0,
-        min=1.0,
-        max=3.0,
+        min=0.1,
+        max=5.0,
         update=_on_handle_smoothness_update,
     )
     part_control_point_count: IntProperty(
@@ -183,15 +182,11 @@ class GESTUREBONE_PG_CurveBoneChain(bpy.types.PropertyGroup):
         min=1,
         options={'HIDDEN'},
     )
-    part_plotting_bones: CollectionProperty(type=GESTUREBONE_PG_BoneName)
-    plotting_bones_expanded: BoolProperty(name="Plotting Bones", default=False)
-
     # ── Runtime state ──────────────────────────────────────────────────────────
     is_bound: BoolProperty(name="Bound", default=False)
     is_drawing: BoolProperty(name="Drawing", default=False)
     bones_expanded: BoolProperty(name="Bones", default=False)
 
-    last_baked_frame: IntProperty(name="Last Baked Frame", default=-1)
     drawing_frame: IntProperty(name="Drawing Frame", default=-1)
 
 

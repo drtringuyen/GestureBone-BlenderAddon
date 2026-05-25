@@ -244,18 +244,32 @@ class GESTUREBONE_OT_ClearRig(bpy.types.Operator):
         meta_rig_name = props.meta_rig
         removed       = []
 
-        # 1. Delete legacy "Splines" collection
+        # 1. Delete legacy "Splines" collection (old hardcoded name)
         legacy = bpy.data.collections.get("Splines")
         if legacy:
             _delete_coll(legacy)
             removed.append("Splines")
 
-        # 2. Delete <MetaRig>.Gesture_Splines collection
+        # 2. Delete legacy <MetaRig>.Gesture_Splines collection (old wrong naming)
         gs_name = f"{meta_rig_name}.Gesture_Splines"
         gs_coll = bpy.data.collections.get(gs_name)
         if gs_coll:
             _delete_coll(gs_coll)
             removed.append(gs_name)
+
+        # 3. Delete <MetaRig>.GestureSplines collection
+        gest_name = f"{meta_rig_name}.GestureSplines"
+        gest_coll = bpy.data.collections.get(gest_name)
+        if gest_coll:
+            _delete_coll(gest_coll)
+            removed.append(gest_name)
+
+        # 4. Delete <MetaRig>.PlottingSplines collection
+        plot_name = f"{meta_rig_name}.PlottingSplines"
+        plot_coll = bpy.data.collections.get(plot_name)
+        if plot_coll:
+            _delete_coll(plot_coll)
+            removed.append(plot_name)
 
         # 3. Delete SampleMesh collection
         sample = bpy.data.collections.get("SampleMesh")

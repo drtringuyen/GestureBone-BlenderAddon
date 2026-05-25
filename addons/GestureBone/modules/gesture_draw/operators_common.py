@@ -109,22 +109,21 @@ class GESTUREBONE_OT_LoadChainsFromMetaRig(bpy.types.Operator):
             if bone_settings:
                 chain.part_control_mode        = bone_settings.control_mode
                 chain.part_control_point_count = CONTROL_MODE_COUNT.get(bone_settings.control_mode, 5)
-            _resize_collection(chain.part_control_bones,  chain.part_control_point_count)
-            _resize_collection(chain.part_plotting_bones, chain.part_plotting_point_count)
+            _resize_collection(chain.part_control_bones, chain.part_control_point_count)
 
-            # Link GestureSpline — prefer merged naming (RigName.Gesture_Bone_GestureSpline)
-            # then fall back to original WIP naming (RigName-Bone.GestureSpline)
+            # Link GestureSpline — prefer canonical naming (RigName-Bone.GestureSpline)
+            # then fall back to legacy merged naming (RigName.Gesture_Bone_GestureSpline)
             g_obj = (
-                bpy.data.objects.get(f"{gesture_arm_name}_{bone_name}_GestureSpline")
-                or bpy.data.objects.get(f"{meta_rig_name}-{bone_name}.GestureSpline")
+                bpy.data.objects.get(f"{meta_rig_name}-{bone_name}.GestureSpline")
+                or bpy.data.objects.get(f"{gesture_arm_name}_{bone_name}_GestureSpline")
             )
             if g_obj and g_obj.type == 'CURVE':
                 chain.part_gesture_spline = g_obj
 
             # Link PlottingSpline — same preference order
             p_obj = (
-                bpy.data.objects.get(f"{gesture_arm_name}_{bone_name}_PlottingSpline")
-                or bpy.data.objects.get(f"{meta_rig_name}-{bone_name}.PlottingSpline")
+                bpy.data.objects.get(f"{meta_rig_name}-{bone_name}.PlottingSpline")
+                or bpy.data.objects.get(f"{gesture_arm_name}_{bone_name}_PlottingSpline")
             )
             if p_obj and p_obj.type == 'CURVE':
                 chain.part_plotting_spline = p_obj

@@ -158,7 +158,11 @@ class GESTUREBONE_OT_RigPart(bpy.types.Operator):
             return {'CANCELLED'}
 
         for idname, step_num in _STEP_SEQUENCE:
-            result = _invoke_op(idname)
+            try:
+                result = _invoke_op(idname)
+            except RuntimeError as e:
+                self.report({'ERROR'}, f"Step {step_num} failed — {e}")
+                return {'CANCELLED'}
             if 'CANCELLED' in result:
                 self.report({'ERROR'}, f"Step {step_num} cancelled — '{idname}'")
                 return {'CANCELLED'}

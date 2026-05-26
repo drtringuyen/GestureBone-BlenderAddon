@@ -101,9 +101,10 @@ class GESTUREBONE_OT_DuplicateAtomicChain(bpy.types.Operator):
                 props.wip_empty = obj.name
                 break
         if not props.wip_empty:
-            self.report({'WARNING'},
-                f"Duplicated OK but '{alignment_name}' empty not found -- "
+            self.report({'ERROR'},
+                f"'{alignment_name}' empty not found in template -- "
                 "ensure your template has a '<TOKEN>-Alignment' empty")
+            return {'CANCELLED'}
 
         self.report({'INFO'}, f"Duplicated '{src.name}' -> {count} objects renamed ('{token}' -> '{meta_rig_name}-{bone_name}')")
         props.last_step      = self.bl_idname
@@ -477,14 +478,12 @@ class GESTUREBONE_OT_FinishMerging(bpy.types.Operator):
                     arm_obj.data.edit_bones.remove(eb)
             bpy.ops.object.mode_set(mode='OBJECT')
 
-        template_coll = _atomic_coll(props)
-        template_objs = set(_all_objects(template_coll)) if template_coll else set()
-
+        meta_prefix = f"{props.meta_rig}-"
         for obj in list(bpy.data.objects):
             if obj.type != 'EMPTY' or not obj.name.endswith('-Alignment'):
                 continue
-            if obj in template_objs:
-                continue
+            if not obj.name.startswith(meta_prefix):
+                continue  # template or foreign empty — never touch it
             for child in list(obj.children):
                 try:
                     bpy.ops.object.select_all(action='DESELECT')

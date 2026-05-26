@@ -39,9 +39,15 @@ class GESTUREBONE_PT_RigGeneration(bpy.types.Panel):
         box = layout.box()
         box.label(text="Registration", icon='PROPERTIES')
         col = box.column(align=True)
-        col.prop(props, "atomic_chain")
-        col.prop(props, "meta_rig")
-        col.prop(props, "meta_collection")
+        split = col.split(factor=0.5)
+        split.label(text="Default Template")
+        split.prop(props, "atomic_chain", text="")
+        split = col.split(factor=0.5)
+        split.label(text="Meta Rig")
+        split.prop(props, "meta_rig", text="")
+        split = col.split(factor=0.5)
+        split.label(text="Meta Collection")
+        split.prop(props, "meta_collection", text="")
         col.separator()
 
         # MetaBone + Control Mode quick-access row (above Auto Rig)
@@ -50,15 +56,16 @@ class GESTUREBONE_PT_RigGeneration(bpy.types.Panel):
         entry         = props.bone_settings.get(bone_name) if bone_selected else None
         mode_ready    = entry is not None
 
+        # Single row: MetaBone | Template | Control Mode | Pivot
         row = col.row(align=True)
         row.prop(props, "active_meta_bone", text="")
         if mode_ready:
-            row.prop(entry, "control_mode", text="")
-        else:
-            # Red button when bone is selected but mode not yet initialised
-            sub         = row.row(align=True)
-            sub.enabled = bone_selected
-            sub.alert   = bone_selected
+            row.prop(entry, "atomic_chain",    text="")
+            row.prop(entry, "control_mode",    text="")
+            row.prop(entry, "pivot_placement", text="", icon_only=True)
+        elif bone_selected:
+            sub       = row.row(align=True)
+            sub.alert = True
             sub.operator("gesturebone.init_bone_control_mode", text="", icon='SETTINGS')
 
         col.separator()
@@ -86,26 +93,25 @@ class GESTUREBONE_PT_RigGeneration(bpy.types.Panel):
         meta_solo = props.meta_solo_mode
         meta_icon = 'BONE_DATA' if meta_solo else 'GROUP_BONE'
 
-        # Main action row: Auto Rig | Delete Sample Folder | META
-        main_row = ops_col.row(align=True)
-        sub = main_row.row(align=True)
-        sub.scale_x = 3.0
-        sub.operator("gesturebone.auto_rig", icon='PLAY')
-        main_row.operator("gesturebone.clear_rig", text="", icon='GHOST_DISABLED')
-        main_row.operator("gesturebone.delete_sample_folder", text="", icon='ORPHAN_DATA')
-        main_row.operator("gesturebone.toggle_meta_collection",
+        # Row 1: Auto Rig (wide) + 3 management icon buttons at end
+        auto_row = ops_col.row(align=True)
+        main_btn = auto_row.row(align=True)
+        main_btn.scale_x = 6.0
+        main_btn.operator("gesturebone.auto_rig", icon='PLAY')
+        auto_row.operator("gesturebone.clear_rig", text="", icon='GHOST_DISABLED')
+        auto_row.operator("gesturebone.delete_sample_folder", text="", icon='ORPHAN_DATA')
+        auto_row.operator("gesturebone.toggle_meta_collection",
                           text="", icon=meta_icon, depress=meta_solo)
 
-        ops_col.separator()
-
-        # Utility row: CONNECT (toggle) | Reset Stretch | PIVOT
-        row = ops_col.row(align=True)
-        row.operator("gesturebone.toggle_connect_selectable",
-                     text="CONNECT", icon=connect_icon, depress=connect_selectable)
-        row.operator("gesturebone.reset_all_bones_stretch",
-                     text="Reset Stretch", icon='SNAP_MIDPOINT')
-        row.operator("gesturebone.toggle_pivot_rotation",
-                     text="PIVOT", icon=pivot_icon, depress=pivot_active)
+        # Row 2: 3 labelled adjustment buttons filling the row
+        util_row = ops_col.row(align=True)
+        util_row.operator("gesturebone.toggle_connect_selectable",
+                          icon=connect_icon, depress=connect_selectable)
+        util_row.operator("gesturebone.reset_all_bones_stretch",
+                          icon='SNAP_MIDPOINT')
+        util_row.operator("gesturebone.toggle_pivot_rotation",
+                          icon=pivot_icon if pivot_icon != 'NONE' else 'PIVOT_CURSOR',
+                          depress=pivot_active)
 
         # ── Debug-only sections ───────────────────────────────────────────────
         global_props = getattr(context.scene, 'gesturebone_props', None)
@@ -127,7 +133,9 @@ class GESTUREBONE_PT_RigGeneration(bpy.types.Panel):
                 if bone_name and bone_name != 'NONE':
                     entry = props.bone_settings.get(bone_name)
                     if entry:
-                        col.prop(entry, "control_mode", text="Control Mode")
+                        col.prop(entry, "atomic_chain",    text="Template")
+                        col.prop(entry, "control_mode",    text="Control Mode")
+                        col.prop(entry, "pivot_placement", text="Pivot Placement")
                     else:
                         col.operator("gesturebone.init_bone_control_mode",
                                      text="Set Control Mode", icon='SETTINGS')

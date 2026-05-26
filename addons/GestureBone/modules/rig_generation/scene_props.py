@@ -36,6 +36,14 @@ def _collection_items(self, context):
     return items if items else [('NONE', 'No collections found', '')]
 
 
+def _bone_template_items(self, context):
+    """Per-bone template dropdown — first item is a 'use global' sentinel."""
+    items = [('NONE', '(Default Template)', 'Fall back to the global Registration template')]
+    if context:
+        items += [(c.name, c.name, '') for c in bpy.data.collections]
+    return items
+
+
 def _armature_name_search(self, context, edit_text):
     all_arms = [o.name for o in bpy.data.objects if o.type == 'ARMATURE']
     if not edit_text or edit_text == self.meta_rig:
@@ -101,11 +109,29 @@ def _on_bone_settings_control_mode_update(self, context):
 class GESTUREBONE_PG_MetaBoneSettings(bpy.types.PropertyGroup):
     """Per-MetaBone settings stored by bone name (accessed via bone_settings.get(bone_name))."""
     # 'name' StringProperty is inherited from PropertyGroup — used as the bone_name key
+    atomic_chain: EnumProperty(
+        name="Template",
+        description="Template collection for this bone. 'use global' falls back to the Registration template",
+        items=_bone_template_items,
+    )
     control_mode: EnumProperty(
         name="Control Mode",
         items=CONTROL_MODES,
         default='PT_5',
         update=_on_bone_settings_control_mode_update,
+    )
+    pivot_placement: EnumProperty(
+        name="Pivot Placement",
+        description="Where to place CTRL-<Bone>.Rotation and CTRL-<Bone>.Pivot after binding",
+        items=[
+            ('ORIGIN', "At Origin",
+             "Keep Rotation/Pivot bones at their template position",
+             'OBJECT_ORIGIN', 0),
+            ('CENTER', "At Center",
+             "Slide Rotation/Pivot bone heads to the MetaBone midpoint (keeps length & roll)",
+             'SNAP_MIDPOINT', 1),
+        ],
+        default='ORIGIN',
     )
 
 
@@ -119,6 +145,7 @@ class GESTUREBONE_PG_RigGenerationProps(bpy.types.PropertyGroup):
                                     update=_on_active_meta_bone_update)
     wip_coll:         StringProperty(options={'HIDDEN'})
     wip_empty:        StringProperty(options={'HIDDEN'})
+    wip_token:        StringProperty(options={'HIDDEN'})  # resolved template token for current pipeline run
     last_step:        StringProperty(options={'HIDDEN'})
     is_aligning:      BoolProperty( options={'HIDDEN'})
     completed_step:   IntProperty(  default=0, options={'HIDDEN'})

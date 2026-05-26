@@ -23,19 +23,25 @@ class GESTUREBONE_OT_DuplicateAtomicChain(bpy.types.Operator):
         props.completed_step = 0
 
         bone_name     = props.active_meta_bone
-        token         = props.atomic_chain
         meta_rig_name = props.meta_rig
 
         if not bone_name or bone_name == 'NONE':
             self.report({'ERROR'}, "Select a MetaBone first")
             return {'CANCELLED'}
+
+        # Resolve template: per-bone setting overrides the global Registration template
+        entry      = props.bone_settings.get(bone_name)
+        per_bone   = getattr(entry, 'atomic_chain', 'NONE') if entry else 'NONE'
+        token      = per_bone if (per_bone and per_bone != 'NONE') else props.atomic_chain
+        props.wip_token = token   # store so Steps 2-9 use the same token without re-reading
+
         if not token or token == 'NONE':
-            self.report({'ERROR'}, "Select a template collection first")
+            self.report({'ERROR'}, "No template selected — set one in Registration or per-bone")
             return {'CANCELLED'}
 
-        src = _atomic_coll(props)
+        src = _atomic_coll(props)   # now reads wip_token
         if not src:
-            self.report({'ERROR'}, f"Collection '{token}' not found")
+            self.report({'ERROR'}, f"Template collection '{token}' not found")
             return {'CANCELLED'}
 
         target_colls = _rig_target_colls(props)
@@ -163,7 +169,7 @@ class GESTUREBONE_OT_RebindConstraintsGeonodes(bpy.types.Operator):
     def execute(self, context):
         props         = _p(context)
         bone_name     = props.active_meta_bone
-        token         = props.atomic_chain
+        token         = props.wip_token or props.atomic_chain
         meta_rig_name = props.meta_rig
 
         if not bone_name or bone_name == 'NONE':
@@ -201,19 +207,26 @@ class GESTUREBONE_OT_RefreshRigs(bpy.types.Operator):
     bl_options     = {'REGISTER', 'UNDO'}
 
     def _strip_bones(self, context, arm_target, meta_arm, meta_coll_name, token, bone_name):
-        """Enter edit mode on arm_target and remove: meta-collection bones,
-        token-named bones, and any bone_name bones left from a previous run."""
+        """Enter edit mode on arm_target and remove:
+        - All bones already in MetaRig (META collection + previously merged rounds)
+        - Token-named bones (template placeholder leftovers)
+        - bone_name bones (stale bones from a previous run of this same part)
+
+        The key fix for round 2+: when .Rig is recreated as a MetaRig copy it
+        inherits all previously-merged bones (e.g. Arms in round 2). Those must
+        be stripped here or Step 10 will double-merge them into MetaRig.
+        """
+        # Collect every bone name currently in MetaRig — this covers both
+        # META-collection bones and any bones merged in previous rounds.
+        all_meta_names = {b.name for b in meta_arm.data.bones}
+
         bpy.ops.object.select_all(action='DESELECT')
         arm_target.hide_set(False)
         arm_target.select_set(True)
         context.view_layer.objects.active = arm_target
         bpy.ops.object.mode_set(mode='EDIT')
-        for bname in _bones_in_bone_coll(meta_arm.data, meta_coll_name):
-            eb = arm_target.data.edit_bones.get(bname)
-            if eb:
-                arm_target.data.edit_bones.remove(eb)
         for eb in list(arm_target.data.edit_bones):
-            if token in eb.name or bone_name in eb.name:
+            if eb.name in all_meta_names or token in eb.name or bone_name in eb.name:
                 arm_target.data.edit_bones.remove(eb)
         bpy.ops.object.mode_set(mode='OBJECT')
 
@@ -228,7 +241,7 @@ class GESTUREBONE_OT_RefreshRigs(bpy.types.Operator):
         rig_name     = f"{arm_obj.name}.Rig"
         gesture_name = f"{arm_obj.name}.Gesture"
         target_colls = _rig_target_colls(props)
-        token        = props.atomic_chain
+        token        = props.wip_token or props.atomic_chain
         _ensure_object_mode(context)
 
         # .Rig: create if missing, then always strip stale bones
@@ -432,7 +445,7 @@ class GESTUREBONE_OT_FinishMerging(bpy.types.Operator):
             return {'CANCELLED'}
 
         target_colls = _rig_target_colls(props)
-        token        = props.atomic_chain
+        token        = props.wip_token or props.atomic_chain
         _ensure_object_mode(context)
 
         wip      = bpy.data.collections.get(props.wip_coll)
@@ -654,7 +667,7 @@ class GESTUREBONE_OT_RebindArmatureDeform(bpy.types.Operator):
             all_objs.extend(_all_objects(coll))
         mesh_objs = [o for o in all_objs if o.type == 'MESH']
 
-        token   = props.atomic_chain
+        token   = props.wip_token or props.atomic_chain
         count   = 0
         skipped = 0
         for obj in mesh_objs:

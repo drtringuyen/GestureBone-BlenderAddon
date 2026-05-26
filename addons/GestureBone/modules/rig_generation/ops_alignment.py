@@ -4,6 +4,7 @@ ops_alignment.py — Steps 3, 4, 5, 6: alignment empty workflow + depsgraph hand
 import bpy
 from mathutils import Vector
 from .utils import _p, _meta_rig, _ensure_object_mode
+from .scene_props import _get_bone_settings
 
 _ALIGN_STATE = {}
 
@@ -41,6 +42,47 @@ def _register_align_handler():
 def _unregister_align_handler():
     if _alignment_scale_handler in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(_alignment_scale_handler)
+
+
+# ─── PIVOT PLACEMENT HELPER ───────────────────────────────────────────────────
+
+def _reposition_pivot_bones(context, wip_arm, meta_arm, bone_name):
+    """Slide CTRL-{bone_name}.Rotation and CTRL-{bone_name}.Pivot heads to the
+    MetaBone midpoint, keeping their original direction, length, and bone roll.
+
+    After AcceptAndBind the WIP armature has transforms applied, so its
+    matrix_world is effectively identity — centre_local ≈ centre_world.
+    We still go through the full inverse to be safe.
+    """
+    data_bone = meta_arm.data.bones.get(bone_name)
+    if not data_bone:
+        return
+
+    head_w   = meta_arm.matrix_world @ Vector(data_bone.head_local)
+    tail_w   = meta_arm.matrix_world @ Vector(data_bone.tail_local)
+    center_w = (head_w + tail_w) * 0.5
+
+    # WIP armature local space (identity after transform_apply, but kept general)
+    center_local = wip_arm.matrix_world.inverted() @ center_w
+
+    target_names = [f"CTRL-{bone_name}.Rotation", f"CTRL-{bone_name}.Pivot"]
+
+    _ensure_object_mode(context)
+    bpy.ops.object.select_all(action='DESELECT')
+    wip_arm.hide_set(False)
+    wip_arm.select_set(True)
+    context.view_layer.objects.active = wip_arm
+    bpy.ops.object.mode_set(mode='EDIT')
+
+    for bname in target_names:
+        eb = wip_arm.data.edit_bones.get(bname)
+        if eb:
+            direction = eb.tail - eb.head   # preserve length and direction
+            eb.head   = center_local.copy()
+            eb.tail   = center_local + direction
+            # bone roll is unchanged — only head/tail positions moved
+
+    bpy.ops.object.mode_set(mode='OBJECT')
 
 
 # ─── STEP 3 ───────────────────────────────────────────────────────────────────
@@ -231,8 +273,19 @@ class GESTUREBONE_OT_AcceptAndBind(bpy.types.Operator):
                 self.report({'WARNING'}, f"Could not apply transforms to '{child.name}': {e}")
 
         bpy.data.objects.remove(empty_obj, do_unlink=True)
-        props.wip_empty      = ''
-        props.is_aligning    = False
+        props.wip_empty   = ''
+        props.is_aligning = False
+
+        # Reposition pivot bones if requested (At Center mode)
+        bone_name = props.active_meta_bone
+        if bone_name and bone_name != 'NONE':
+            settings = _get_bone_settings(props, bone_name)
+            if settings.pivot_placement == 'CENTER':
+                wip_arm  = next((c for c in children if c.type == 'ARMATURE'), None)
+                meta_arm = _meta_rig(props)
+                if wip_arm and meta_arm:
+                    _reposition_pivot_bones(context, wip_arm, meta_arm, bone_name)
+
         props.last_step      = self.bl_idname
         props.completed_step = 6
 

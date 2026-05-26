@@ -13,7 +13,9 @@ def _meta_rig(props):
 
 
 def _atomic_coll(props):
-    return bpy.data.collections.get(props.atomic_chain)
+    """Return the template collection — prefers wip_token (resolved per-bone) over the global atomic_chain."""
+    name = props.wip_token if props.wip_token else props.atomic_chain
+    return bpy.data.collections.get(name)
 
 
 def _rig_target_colls(props):
@@ -98,7 +100,8 @@ def _ensure_object_mode(context):
 
 
 def _clean(s, token, bone_name):
-    return _BLENDER_SUFFIX.sub('', s).replace(token, bone_name)
+    stripped = _BLENDER_SUFFIX.sub('', s)
+    return re.sub(re.escape(token), bone_name, stripped, flags=re.IGNORECASE)
 
 
 def _rename_coll_tree(coll, token, bone_name):

@@ -31,11 +31,11 @@ class GESTUREBONE_OT_DuplicateAtomicChain(bpy.types.Operator):
 
         # Resolve template: per-bone setting overrides the global Registration template
         entry      = props.bone_settings.get(bone_name)
-        per_bone   = getattr(entry, 'atomic_chain', 'NONE') if entry else 'NONE'
-        token      = per_bone if (per_bone and per_bone != 'NONE') else props.atomic_chain
+        per_bone   = getattr(entry, 'atomic_chain', '') if entry else ''
+        token      = per_bone if per_bone else props.atomic_chain
         props.wip_token = token   # store so Steps 2-9 use the same token without re-reading
 
-        if not token or token == 'NONE':
+        if not token:
             self.report({'ERROR'}, "No template selected — set one in Registration or per-bone")
             return {'CANCELLED'}
 

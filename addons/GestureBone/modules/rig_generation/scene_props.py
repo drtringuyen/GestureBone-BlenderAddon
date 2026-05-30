@@ -29,19 +29,20 @@ def _get_bone_settings(props, bone_name):
 
 # ── Dynamic enum / search callbacks ──────────────────────────────────────────
 
-def _collection_items(self, context):
-    if not context:
-        return [('NONE', '(no context)', '')]
-    items = [(c.name, c.name, '') for c in bpy.data.collections]
-    return items if items else [('NONE', 'No collections found', '')]
+def _collection_search(self, context, edit_text):
+    names = [c.name for c in bpy.data.collections]
+    if not edit_text:
+        return names
+    lo = edit_text.lower()
+    return [n for n in names if lo in n.lower()]
 
 
-def _bone_template_items(self, context):
-    """Per-bone template dropdown — first item is a 'use global' sentinel."""
-    items = [('NONE', '(Default Template)', 'Fall back to the global Registration template')]
-    if context:
-        items += [(c.name, c.name, '') for c in bpy.data.collections]
-    return items
+def _bone_template_search(self, context, edit_text):
+    names = [c.name for c in bpy.data.collections]
+    if not edit_text:
+        return names
+    lo = edit_text.lower()
+    return [n for n in names if lo in n.lower()]
 
 
 def _armature_name_search(self, context, edit_text):
@@ -109,10 +110,10 @@ def _on_bone_settings_control_mode_update(self, context):
 class GESTUREBONE_PG_MetaBoneSettings(bpy.types.PropertyGroup):
     """Per-MetaBone settings stored by bone name (accessed via bone_settings.get(bone_name))."""
     # 'name' StringProperty is inherited from PropertyGroup — used as the bone_name key
-    atomic_chain: EnumProperty(
+    atomic_chain: StringProperty(
         name="Template",
-        description="Template collection for this bone. 'use global' falls back to the Registration template",
-        items=_bone_template_items,
+        description="Template collection for this bone. Leave empty to fall back to the global Registration template",
+        search=_bone_template_search,
     )
     control_mode: EnumProperty(
         name="Control Mode",
@@ -136,7 +137,7 @@ class GESTUREBONE_PG_MetaBoneSettings(bpy.types.PropertyGroup):
 
 
 class GESTUREBONE_PG_RigGenerationProps(bpy.types.PropertyGroup):
-    atomic_chain:     EnumProperty( name="Template",         items=_collection_items)
+    atomic_chain:     StringProperty(name="Template",         search=_collection_search)
     meta_rig:         StringProperty(name="Meta Rig",        default="MetaRig",
                                      search=_armature_name_search)
     meta_collection:  StringProperty(name="Meta Collection", default="MetaCollection",

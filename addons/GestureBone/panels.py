@@ -97,6 +97,10 @@ class GESTUREBONE_PT_MainPanel(bpy.types.Panel):
             row = layout.row()
             row.alert = True
             row.label(text="Select a Plotting or Gesture rig", icon='ERROR')
+            layout.operator("gesturebone.append_essentials",
+                            text="Load Essentials", icon='FILE_REFRESH')
+            layout.operator("gesturebone.create_rig",
+                            text="Create Rig", icon='ADD')
             return
 
         arm_props = arm.gesturebone_props

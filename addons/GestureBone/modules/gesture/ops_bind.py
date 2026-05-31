@@ -113,9 +113,13 @@ class GESTUREBONE_OT_LoadChains(bpy.types.Operator):
 
 
 def _ensure_and_refresh_constraints(gesture_arm, chain):
-    """Create GEOMETRY_ATTRIBUTE constraints if they don't exist."""
-    if not _constraints_exist(gesture_arm, chain):
-        _create_constraints_for_chain(gesture_arm, chain)
+    """Create or refresh GEOMETRY_ATTRIBUTE constraints on all CTRL bones.
+
+    Always recreates — sample_index values can be stale when the template already
+    carries Gesture_copy constraints with wrong indices (e.g. _3/_4 at 0 instead
+    of 3/4). The inner function removes existing constraints before adding new ones.
+    """
+    _create_constraints_for_chain(gesture_arm, chain)
 
 
 def _create_constraints_for_chain(gesture_arm, chain):

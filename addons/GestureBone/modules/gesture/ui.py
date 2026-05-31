@@ -84,6 +84,23 @@ def draw_gesture_ui(layout, context, arm):
         # Spline picker
         body.prop(chain, "gesture_spline", text="Spline")
 
+        # Control bones (always visible for debugging)
+        ctrl_header = body.row()
+        ctrl_header.prop(
+            chain, "control_bones_expanded",
+            icon='TRIA_DOWN' if chain.control_bones_expanded else 'TRIA_RIGHT',
+            text=f"Control Bones ({len(chain.control_bones)})", emboss=False,
+        )
+        if chain.control_bones_expanded:
+            ctrl_col = body.column(align=True)
+            if chain.control_bones:
+                for i, entry in enumerate(chain.control_bones):
+                    ctrl_col.prop(entry, "bone", text=f"[{i}]")
+            else:
+                no_b = ctrl_col.row()
+                no_b.enabled = False
+                no_b.label(text="No control bones — run Load Chains")
+
         # Draw controls
         if is_bound:
             draw_row = body.row(align=True)

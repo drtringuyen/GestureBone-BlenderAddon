@@ -117,7 +117,10 @@ def _apply_control_mode(context, arm, bone_name):
     _apply_control_mode_to_plotting(plotting_obj, gn_int)
 
     if mode in ('PT_2', 'PT_3'):
-        gesture_name = f"{meta_rig_name}.Gesture"
+        # Step 1 names the WIP copy "{meta_rig_name}-{bone_name}.Gesture".
+        # The final "{meta_rig_name}.Gesture" does not exist yet at this point
+        # (it is created/merged in Steps 7-9), so we must target the WIP copy.
+        gesture_name = f"{meta_rig_name}-{bone_name}.Gesture"
         gesture_obj  = bpy.data.objects.get(gesture_name)
         _delete_extra_ctrl_bones(context, gesture_obj, bone_name)
 

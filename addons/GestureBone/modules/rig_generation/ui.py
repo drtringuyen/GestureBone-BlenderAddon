@@ -43,7 +43,7 @@ class GESTUREBONE_PT_RigGeneration(bpy.types.Panel):
         box = layout.box()
         reg_header = box.row()
         reg_header.label(text="Registration", icon='PROPERTIES')
-        reg_header.operator("gesturebone.append_essentials", text="Refresh", icon='FILE_REFRESH')
+        reg_header.operator("gesturebone.append_essentials", text="Load Essentials", icon='FILE_REFRESH')
         col = box.column(align=True)
 
         # MetaRig Template + Create Rig
@@ -274,6 +274,27 @@ class GESTUREBONE_PT_RigGeneration(bpy.types.Panel):
 
                 _step(col, props, "gesturebone.rebind_armature_deform",
                       'MOD_ARMATURE',           11, "11. Rebind Armature Deform")
+
+                col.separator()
+
+                # Steps 12a–12b: Bind to Mesh sub-steps
+                # AutoRig calls bind_to_mesh (both in one shot) after rig_part().
+                bone_name_dbg = props.active_meta_bone
+
+                def _bind_step(idname, label, icon, gate):
+                    r = col.row()
+                    r.enabled = (props.completed_step == gate)
+                    if bone_name_dbg and bone_name_dbg != 'NONE':
+                        op = r.operator(idname, text=label, icon=icon,
+                                        depress=(props.last_step == idname))
+                        op.bone_name = bone_name_dbg
+                    else:
+                        r.label(text=label, icon=icon)
+
+                _bind_step("gesturebone.bind_step_move_collection",
+                           "12a. Move Bind Mesh to Collection", 'COLLECTION_NEW', 11)
+                _bind_step("gesturebone.bind_step_copy_geometry",
+                           "12b. Copy Geometry to Sample",      'MESH_DATA',      12)
 
 
 def register():

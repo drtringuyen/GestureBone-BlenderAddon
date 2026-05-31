@@ -6,7 +6,7 @@ import bmesh
 import os
 from bpy.props import StringProperty
 from .utils import _p, _meta_rig, _bones_in_bone_coll, _ensure_object_mode, _delete_coll, _all_bone_colls
-from .scene_props import CONTROL_MODE_GN_INT, _get_bone_settings
+from .scene_props import CONTROL_MODE_GN_INT, _get_bone_settings, _default_template
 
 
 _ADDON_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -145,8 +145,8 @@ class GESTUREBONE_OT_InitBoneControlMode(bpy.types.Operator):
             return {'CANCELLED'}
         entry = _get_bone_settings(props, bone_name)   # creates entry with default PT_5
         # Auto-fill template from global fallback if entry is fresh (no template set yet)
-        if not entry.atomic_chain and props.atomic_chain:
-            entry.atomic_chain = props.atomic_chain
+        if not entry.atomic_chain:
+            entry.atomic_chain = props.atomic_chain or _default_template()
         return {'FINISHED'}
 
 
@@ -567,10 +567,95 @@ class GESTUREBONE_OT_ToggleMetaCollection(bpy.types.Operator):
 
 # ─── BIND TO MESH ─────────────────────────────────────────────────────────────
 
+def _bind_resolve(context, bone_name):
+    """Return (props, bind_mesh, sample_mesh) for the given bone, or raise ValueError."""
+    props = _p(context)
+    bone  = bone_name or props.active_meta_bone
+    entry = props.bone_settings.get(bone)
+    if entry is None:
+        raise ValueError(f"No settings for bone '{bone}'")
+    if not entry.bind_mesh:
+        raise ValueError("Bind Mesh not set")
+    if not entry.sample_mesh:
+        raise ValueError("Sample Mesh not set — run Steps 1–9 first")
+    return props, entry.bind_mesh, entry.sample_mesh
+
+
+class GESTUREBONE_OT_BindStepMoveCollection(bpy.types.Operator):
+    bl_idname      = "gesturebone.bind_step_move_collection"
+    bl_label       = "12a. Move Bind Mesh to Collection"
+    bl_description = (
+        "Create (or find) 'Original Mesh' collection and move the bind mesh there "
+        "exclusively, unlinking it from every other collection"
+    )
+    bl_options = {'REGISTER', 'UNDO'}
+
+    bone_name: StringProperty(options={'HIDDEN'})
+
+    def execute(self, context):
+        try:
+            props, bind_mesh, _ = _bind_resolve(context, self.bone_name)
+        except ValueError as e:
+            self.report({'ERROR'}, str(e))
+            return {'CANCELLED'}
+
+        coll = bpy.data.collections.get("Original Mesh")
+        if coll is None:
+            legacy = bpy.data.collections.get("Mesh")
+            coll   = legacy if legacy else bpy.data.collections.new("Original Mesh")
+            if legacy:
+                coll.name = "Original Mesh"
+            else:
+                context.scene.collection.children.link(coll)
+
+        for c in list(bind_mesh.users_collection):
+            if c != coll:
+                c.objects.unlink(bind_mesh)
+        if bind_mesh.name not in coll.objects:
+            coll.objects.link(bind_mesh)
+
+        props.last_step      = self.bl_idname
+        props.completed_step = 12
+        self.report({'INFO'}, f"'{bind_mesh.name}' → 'Original Mesh'")
+        return {'FINISHED'}
+
+
+class GESTUREBONE_OT_BindStepCopyGeometry(bpy.types.Operator):
+    bl_idname      = "gesturebone.bind_step_copy_geometry"
+    bl_label       = "12b. Copy Geometry to Sample"
+    bl_description = (
+        "Transform bind mesh vertices into sample mesh local space via bmesh, "
+        "then write onto sample mesh data (replaces geometry, keeps vertex groups)"
+    )
+    bl_options = {'REGISTER', 'UNDO'}
+
+    bone_name: StringProperty(options={'HIDDEN'})
+
+    def execute(self, context):
+        try:
+            props, bind_mesh, sample_mesh = _bind_resolve(context, self.bone_name)
+        except ValueError as e:
+            self.report({'ERROR'}, str(e))
+            return {'CANCELLED'}
+
+        world_to_local = sample_mesh.matrix_world.inverted() @ bind_mesh.matrix_world
+        bm = bmesh.new()
+        bm.from_mesh(bind_mesh.data)
+        bmesh.ops.transform(bm, matrix=world_to_local, verts=bm.verts)
+        bm.to_mesh(sample_mesh.data)
+        bm.free()
+        sample_mesh.data.update()
+
+        props.last_step      = self.bl_idname
+        props.completed_step = 12
+        self.report({'INFO'}, f"Geometry: '{bind_mesh.name}' → '{sample_mesh.name}'")
+        return {'FINISHED'}
+
+
 class GESTUREBONE_OT_BindToMesh(bpy.types.Operator):
     bl_idname      = "gesturebone.bind_to_mesh"
     bl_label       = "Bind to Mesh"
-    bl_description = "Copy geometry and materials from Bind_to_Mesh into this bone's Sample Mesh"
+    bl_description = "Run 12a + 12b in one shot (used by Auto Rig)"
     bl_options     = {'REGISTER', 'UNDO'}
 
     bone_name: StringProperty()
@@ -581,78 +666,51 @@ class GESTUREBONE_OT_BindToMesh(bpy.types.Operator):
         if entry is None:
             self.report({'ERROR'}, f"No settings for bone '{self.bone_name}'")
             return {'CANCELLED'}
+        if entry.bind_mesh is None:
+            return {'FINISHED'}   # silent no-op
 
-        bind_mesh = entry.bind_mesh
-        if bind_mesh is None:
-            return {'FINISHED'}   # silent no-op as specified
+        for idname in ("gesturebone.bind_step_move_collection",
+                       "gesturebone.bind_step_copy_geometry"):
+            ns, name = idname.split('.', 1)
+            if 'CANCELLED' in getattr(getattr(bpy.ops, ns), name)(bone_name=self.bone_name):
+                return {'CANCELLED'}
 
-        sample_mesh = entry.sample_mesh
-        if sample_mesh is None:
-            self.report({'ERROR'}, "Sample Mesh not set — run Steps 1–9 first")
-            return {'CANCELLED'}
-
-        # 1. Ensure 'Original Mesh' collection; move source mesh exclusively there.
-        mesh_coll = bpy.data.collections.get("Original Mesh")
-        if mesh_coll is None:
-            # Migrate legacy "Mesh" collection if it exists, otherwise create fresh
-            mesh_coll = bpy.data.collections.get("Mesh")
-            if mesh_coll:
-                mesh_coll.name = "Original Mesh"
-            else:
-                mesh_coll = bpy.data.collections.new("Original Mesh")
-                context.scene.collection.children.link(mesh_coll)
-        # Unlink bind_mesh from every other collection so it lives only in "Original Mesh"
-        for coll in list(bind_mesh.users_collection):
-            if coll != mesh_coll:
-                coll.objects.unlink(bind_mesh)
-        if bind_mesh.name not in mesh_coll.objects:
-            mesh_coll.objects.link(bind_mesh)
-
-        # 2. Use bmesh API — no view-layer membership required for either object.
-        #    Transform bind_mesh vertices from its world space into sample_mesh local
-        #    space so the geometry lands at the correct world position after the copy.
-        world_to_local = sample_mesh.matrix_world.inverted() @ bind_mesh.matrix_world
-        bm = bmesh.new()
-        bm.from_mesh(bind_mesh.data)
-        bmesh.ops.transform(bm, matrix=world_to_local, verts=bm.verts)
-
-        # 3. Write the transformed geometry onto sample_mesh, replacing old geometry.
-        #    Vertex group NAMES on the sample_mesh object are left untouched — only
-        #    the underlying geometry is swapped, so GN references by name still work.
-        bm.to_mesh(sample_mesh.data)
-        bm.free()
-        sample_mesh.data.update()
-
-        # 4. Materials: clear and copy from bind_mesh
-        sample_mesh.data.materials.clear()
-        for mat in bind_mesh.data.materials:
-            sample_mesh.data.materials.append(mat)
-
-        self.report({'INFO'}, f"Bound '{bind_mesh.name}' → '{sample_mesh.name}'")
+        props.last_step      = self.bl_idname
+        props.completed_step = 12
+        self.report({'INFO'}, f"Bound '{entry.bind_mesh.name}' → '{entry.sample_mesh.name}'")
         return {'FINISHED'}
 
 
 # ─── CREATE RIG ───────────────────────────────────────────────────────────────
 
+def _rig_preset_items(self, context):
+    items = [(o.name, o.name, '')
+             for o in bpy.data.objects
+             if o.type == 'ARMATURE' and 'gesturebone_rig_preset' in o]
+    return items if items else [('NONE', 'No presets found', '')]
+
+
 class GESTUREBONE_OT_CreateRig(bpy.types.Operator):
     bl_idname      = "gesturebone.create_rig"
     bl_label       = "Create Rig"
-    bl_description = "Duplicate the Sample Rig template into a new named armature"
+    bl_description = "Duplicate a Rig Preset into a new named armature"
     bl_options     = {'REGISTER', 'UNDO'}
 
     new_rig_name: StringProperty(name="New Rig Name", default="MyRig")
+    rig_preset:   bpy.props.EnumProperty(name="Rig Preset", items=_rig_preset_items)
 
     def invoke(self, context, event):
-        # Find a sample rig to duplicate
-        sample = next((o for o in bpy.data.objects
-                       if o.type == 'ARMATURE' and 'gesturebone_sample_rig' in o), None)
-        if sample is None:
-            self.report({'ERROR'}, "No armature tagged as Sample Rig found")
+        presets = [o for o in bpy.data.objects
+                   if o.type == 'ARMATURE' and 'gesturebone_rig_preset' in o]
+        if not presets:
+            self.report({'ERROR'}, "No armature tagged as Rig Preset found")
             return {'CANCELLED'}
         return context.window_manager.invoke_props_dialog(self)
 
     def draw(self, context):
-        self.layout.prop(self, "new_rig_name")
+        layout = self.layout
+        layout.prop(self, "rig_preset")
+        layout.prop(self, "new_rig_name")
 
     def execute(self, context):
         name = self.new_rig_name.strip()
@@ -660,10 +718,13 @@ class GESTUREBONE_OT_CreateRig(bpy.types.Operator):
             self.report({'ERROR'}, "New rig name cannot be empty")
             return {'CANCELLED'}
 
-        sample = next((o for o in bpy.data.objects
-                       if o.type == 'ARMATURE' and 'gesturebone_sample_rig' in o), None)
-        if sample is None:
-            self.report({'ERROR'}, "No armature tagged as Sample Rig found")
+        if self.rig_preset == 'NONE':
+            self.report({'ERROR'}, "No Rig Preset selected")
+            return {'CANCELLED'}
+
+        sample = bpy.data.objects.get(self.rig_preset)
+        if sample is None or sample.type != 'ARMATURE' or 'gesturebone_rig_preset' not in sample:
+            self.report({'ERROR'}, f"Rig Preset '{self.rig_preset}' not found")
             return {'CANCELLED'}
 
         # 1. Duplicate sample rig via data API (works even if not in view layer)
@@ -684,22 +745,34 @@ class GESTUREBONE_OT_CreateRig(bpy.types.Operator):
         # Copy object-level custom properties from sample (tag stripping happens below)
         for key, val in sample.items():
             new_obj[key] = val
-        # Copy pose bone settings (custom shapes, colors, etc.) from sample
+        # Copy pose bone settings and transforms from sample
         for src_pb in (sample.pose.bones if sample.pose else []):
             dst_pb = new_obj.pose.bones.get(src_pb.name)
             if dst_pb is None:
                 continue
-            dst_pb.custom_shape               = src_pb.custom_shape
-            dst_pb.custom_shape_scale_xyz     = src_pb.custom_shape_scale_xyz[:]
-            dst_pb.custom_shape_translation   = src_pb.custom_shape_translation[:]
+            # Custom shape display
+            dst_pb.custom_shape                = src_pb.custom_shape
+            dst_pb.custom_shape_scale_xyz      = src_pb.custom_shape_scale_xyz[:]
+            dst_pb.custom_shape_translation    = src_pb.custom_shape_translation[:]
             dst_pb.custom_shape_rotation_euler = src_pb.custom_shape_rotation_euler[:]
-            dst_pb.use_custom_shape_bone_size = src_pb.use_custom_shape_bone_size
-            dst_pb.color.palette              = src_pb.color.palette
+            dst_pb.use_custom_shape_bone_size  = src_pb.use_custom_shape_bone_size
+            # Color
+            dst_pb.color.palette               = src_pb.color.palette
+            # Pose transforms — needed so shape size/position matches the preset exactly
+            dst_pb.rotation_mode               = src_pb.rotation_mode
+            dst_pb.location                    = src_pb.location[:]
+            dst_pb.scale                       = src_pb.scale[:]
+            if src_pb.rotation_mode == 'QUATERNION':
+                dst_pb.rotation_quaternion     = src_pb.rotation_quaternion[:]
+            elif src_pb.rotation_mode == 'AXIS_ANGLE':
+                dst_pb.rotation_axis_angle     = src_pb.rotation_axis_angle[:]
+            else:
+                dst_pb.rotation_euler          = src_pb.rotation_euler[:]
 
         # 2. Tags: GestureRigged=True, SampleRig removed
         new_obj["gesturebone_gesture_rigged"] = True
-        if "gesturebone_sample_rig" in new_obj:
-            del new_obj["gesturebone_sample_rig"]
+        if "gesturebone_rig_preset" in new_obj:
+            del new_obj["gesturebone_rig_preset"]
 
         # 3. Create (or get) collection <name> and move rig into it
         rig_coll = bpy.data.collections.get(name)
@@ -850,91 +923,76 @@ class GESTUREBONE_OT_AppendEssentials(bpy.types.Operator):
             self.report({'ERROR'}, f"essentials.blend not found: {essentials_path}")
             return {'CANCELLED'}
 
-        essentials_abs = os.path.normcase(os.path.abspath(essentials_path))
+        _ensure_object_mode(context)
 
-        # Step 1: Make any already-linked data from essentials.blend local
-        linked_libs = {
-            lib for lib in bpy.data.libraries
-            if os.path.normcase(os.path.abspath(bpy.path.abspath(lib.filepath))) == essentials_abs
-        }
-        made_local_libs = 0
-        if linked_libs:
-            _ensure_object_mode(context)
-            bpy.ops.object.select_all(action='DESELECT')
-            for obj in list(context.view_layer.objects):
-                if obj.library in linked_libs:
-                    obj.select_set(True)
-                    context.view_layer.objects.active = obj
-            bpy.ops.object.make_local(type='ALL')
-            bpy.ops.object.select_all(action='DESELECT')
-            made_local_libs = len(linked_libs)
+        # ── Step 1: Read what's in essentials so we know what to delete ──────
+        with bpy.data.libraries.load(essentials_path, link=False) as (src, _):
+            src_ngs    = list(src.node_groups)
+            src_has_ac = self._TEMPLATE_COLL in src.collections
 
-        appended_colls: list[str] = []
-        appended_ngs:   list[str] = []
+        # ── Step 2: Delete existing Atomic Chains collection ─────────────────
+        old_coll = bpy.data.collections.get(self._TEMPLATE_COLL)
+        if old_coll:
+            _delete_coll(old_coll)
 
+        # ── Step 3: Delete node groups that will be re-imported ───────────────
+        for ng_name in src_ngs:
+            ng = bpy.data.node_groups.get(ng_name)
+            if ng:
+                bpy.data.node_groups.remove(ng)
+
+        # ── Step 4: Purge all orphaned data ───────────────────────────────────
+        bpy.ops.outliner.orphans_purge(do_linked_ids=True, do_recursive=True)
+
+        # ── Step 5: Re-append Atomic Chains + all node groups fresh ──────────
+        appended_ngs: list[str] = []
         with bpy.data.libraries.load(essentials_path, link=False) as (src, dst):
-            # Only append the Atomic Chains collection (brings child collections + objects)
-            if self._TEMPLATE_COLL in src.collections and \
-               self._TEMPLATE_COLL not in bpy.data.collections:
-                appended_colls = [self._TEMPLATE_COLL]
-                dst.collections = appended_colls[:]
+            if src_has_ac:
+                dst.collections = [self._TEMPLATE_COLL]
+            dst.node_groups = list(src.node_groups)
+            appended_ngs    = list(src.node_groups)
 
-            # Append any node groups not already present (invisible — no scene clutter)
-            existing_ngs = set(bpy.data.node_groups.keys())
-            new_ngs = [n for n in src.node_groups if n not in existing_ngs]
-            if new_ngs:
-                appended_ngs = list(new_ngs)
-                dst.node_groups = new_ngs
-
-        # Step 3: Link Atomic Chains into scene if not already there
+        # ── Step 6: Link Atomic Chains into scene ────────────────────────────
         coll = bpy.data.collections.get(self._TEMPLATE_COLL)
         if coll and self._TEMPLATE_COLL not in {c.name for c in context.scene.collection.children}:
             context.scene.collection.children.link(coll)
 
-        # Step 4: Hide Atomic Chains (and all children) from viewport
+        # ── Step 7: Hide Atomic Chains from viewport ──────────────────────────
         def _hide_recursive(c):
             c.hide_viewport = True
             for child in c.children:
                 _hide_recursive(child)
 
+        def _find_lc(lc, name):
+            if lc.name == name:
+                return lc
+            for child in lc.children:
+                found = _find_lc(child, name)
+                if found:
+                    return found
+            return None
+
         if coll:
             _hide_recursive(coll)
-            # Also hide via the view-layer layer_collection so the eye icon reflects it
-            def _find_lc(lc, name):
-                if lc.name == name:
-                    return lc
-                for child in lc.children:
-                    found = _find_lc(child, name)
-                    if found:
-                        return found
-                return None
-
             lc = _find_lc(context.view_layer.layer_collection, self._TEMPLATE_COLL)
             if lc:
                 lc.hide_viewport = True
 
-        # Step 5: Collapse Atomic Chains in the outliner
-        outliner = next(
-            (a for a in context.screen.areas if a.type == 'OUTLINER'), None
-        )
+        # ── Step 8: Collapse Atomic Chains in the outliner ───────────────────
+        outliner = next((a for a in context.screen.areas if a.type == 'OUTLINER'), None)
         if outliner:
             region = next((r for r in outliner.regions if r.type == 'WINDOW'), None)
             if region:
                 with context.temp_override(area=outliner, region=region):
-                    for _ in range(6):  # collapse up to 6 nesting levels
+                    for _ in range(6):
                         bpy.ops.outliner.show_one_level(open=False)
 
-        # Report
         parts = []
-        if made_local_libs:
-            parts.append(f"made local ({made_local_libs} lib(s))")
-        if appended_colls:
-            parts.append(f"appended '{self._TEMPLATE_COLL}'")
+        if src_has_ac:
+            parts.append(f"'{self._TEMPLATE_COLL}' replaced")
         if appended_ngs:
-            parts.append(f"{len(appended_ngs)} node group(s)")
-        if not parts:
-            parts.append("already up to date")
-        self.report({'INFO'}, f"Essentials refresh: {', '.join(parts)}")
+            parts.append(f"{len(appended_ngs)} node group(s) replaced")
+        self.report({'INFO'}, f"Load Essentials: {', '.join(parts) or 'done'}")
         return {'FINISHED'}
 
 
@@ -950,6 +1008,8 @@ _classes = [
     GESTUREBONE_OT_ResetAllBonesStretch,
     GESTUREBONE_OT_TogglePivotRotation,
     GESTUREBONE_OT_ToggleMetaCollection,
+    GESTUREBONE_OT_BindStepMoveCollection,
+    GESTUREBONE_OT_BindStepCopyGeometry,
     GESTUREBONE_OT_BindToMesh,
     GESTUREBONE_OT_CreateRig,
     GESTUREBONE_OT_LoadTemplateRig,

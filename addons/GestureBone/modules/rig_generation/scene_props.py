@@ -6,8 +6,33 @@ from bpy.props import (
 from .utils import _bones_in_bone_coll
 
 
+def _obj_in_coll_recursive(obj, coll):
+    """Return True if obj is in coll or any of its descendants."""
+    if obj.name in coll.objects:
+        return True
+    for child in coll.children:
+        if _obj_in_coll_recursive(obj, child):
+            return True
+    return False
+
+
 def _mesh_object_poll(self, obj):
-    return obj.type == 'MESH'
+    if obj.type != 'MESH':
+        return False
+    atomic_chains = bpy.data.collections.get("Atomic Chains")
+    if atomic_chains and _obj_in_coll_recursive(obj, atomic_chains):
+        return False
+    return True
+
+
+def _default_template():
+    """Return the name of the first tagged collection whose name contains '<4_Handles',
+    falling back to the first tagged collection, or '' if none exist."""
+    tagged = [c for c in bpy.data.collections if _TAG_TEMPLATE in c]
+    for c in tagged:
+        if '<4_Handles' in c.name:
+            return c.name
+    return tagged[0].name if tagged else ""
 
 # ── Control Mode constants (shared with ops_actions) ──────────────────────────
 
@@ -112,8 +137,8 @@ def _on_active_meta_bone_update(self, context):
     if entry is None:
         entry = self.bone_settings.add()
         entry.name = bone_name
-    if not entry.atomic_chain and self.atomic_chain:
-        entry.atomic_chain = self.atomic_chain
+    if not entry.atomic_chain:
+        entry.atomic_chain = self.atomic_chain or _default_template()
 
 
 # ── Property groups ───────────────────────────────────────────────────────────

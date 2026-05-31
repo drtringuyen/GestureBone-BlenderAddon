@@ -1,6 +1,6 @@
 import bpy
 
-TAG_SAMPLE_RIG     = "gesturebone_sample_rig"
+TAG_SAMPLE_RIG     = "gesturebone_rig_preset"
 TAG_TEMPLATE       = "gesturebone_template"
 TAG_GESTURE_RIGGED = "gesturebone_gesture_rigged"
 
@@ -19,7 +19,7 @@ def _extra_infos_on(context):
 
 class GESTUREBONE_OT_TagSampleRig(bpy.types.Operator):
     bl_idname  = "gesturebone.tag_sample_rig"
-    bl_label   = "Tag Sample Rig"
+    bl_label   = "Tag Rig Preset"
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
@@ -100,7 +100,7 @@ class GESTUREBONE_PT_ExtraInfos(bpy.types.Panel):
             sr.active_default = tagged_sample
             sr.operator(
                 "gesturebone.tag_sample_rig",
-                text="Sample Rig" + (" ✓" if tagged_sample else ""),
+                text="Rig Preset" + (" ✓" if tagged_sample else ""),
                 icon='CHECKMARK' if tagged_sample else 'RADIOBUT_OFF',
                 depress=tagged_sample,
             )

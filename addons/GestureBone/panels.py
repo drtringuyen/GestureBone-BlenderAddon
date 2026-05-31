@@ -1,3 +1,7 @@
+"""
+panels.py — Main GestureBone panels.
+GESTUREBONE_PT_MainPanel dispatches to plotting or gesture UI based on rig_type.
+"""
 import bpy
 import os
 import json
@@ -20,81 +24,107 @@ def _build_label():
 
 
 class GESTUREBONE_PT_Infos(bpy.types.Panel):
-    """Infos panel - build time, debug, console"""
-    bl_label = "Infos"
-    bl_idname = "GESTUREBONE_PT_infos"
-    bl_space_type = 'VIEW_3D'
+    bl_label       = "Infos"
+    bl_idname      = "GESTUREBONE_PT_infos"
+    bl_space_type  = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "GestureBone"
-    bl_order = 0
-    bl_options = {'DEFAULT_CLOSED'}
+    bl_category    = "GestureBone"
+    bl_order       = 0
+    bl_options     = {'DEFAULT_CLOSED'}
 
     def draw(self, context):
         layout = self.layout
-        props = context.scene.gesturebone_props
+        props  = context.scene.gesturebone_props
 
         row = layout.row(align=True)
-        row.operator("gesturebone.build", text=_build_label(), icon='RESTRICT_VIEW_ON')
-        row.operator("gesturebone.reload", text="", icon='FILE_REFRESH')
+        row.operator("gesturebone.build",          text=_build_label(), icon='RESTRICT_VIEW_ON')
+        row.operator("gesturebone.reload",         text="",             icon='FILE_REFRESH')
         sub = row.row(align=True)
         sub.active_default = props.debug_mode
-        sub.operator("gesturebone.toggle_debug", text="", icon='INFO')
+        sub.operator("gesturebone.toggle_debug",   text="", icon='INFO')
         row.operator("gesturebone.toggle_console", text="", icon='CONSOLE')
-        row.operator("gesturebone.clear_console", text="", icon='TRASH')
+        row.operator("gesturebone.clear_console",  text="", icon='TRASH')
         extra_sub = row.row(align=True)
         extra_sub.active_default = props.extra_infos_mode
-        extra_sub.prop(props, "extra_infos_mode", text="", icon='BOOKMARKS', toggle=True)
+        extra_sub.prop(props, "extra_infos_mode",  text="", icon='BOOKMARKS', toggle=True)
 
         if props.debug_mode:
             from . import module_manager
             row3 = layout.row(align=True)
-            row3.label(text="Modules:", text_ctxt="extra-info-label")
+            row3.label(text="Modules:")
             for m in module_manager.ALL_MODULES:
                 sub = row3.row(align=True)
                 sub.active_default = module_manager.is_loaded(m["name"])
                 sub.operator(m["op"], text=m["name"].capitalize(), icon=m["icon"])
-            layout.label(text="Version: " + props.addon_version,
-                         text_ctxt="extra-info-label")
+            layout.label(text="Version: " + props.addon_version)
 
 
 class GESTUREBONE_PT_MainPanel(bpy.types.Panel):
-    """Main panel - shows active armature; modules register subpanels here"""
-    bl_label = "GestureBone"
-    bl_idname = "GESTUREBONE_PT_main"
-    bl_space_type = 'VIEW_3D'
+    bl_label       = "GestureBone"
+    bl_idname      = "GESTUREBONE_PT_main"
+    bl_space_type  = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "GestureBone"
-    bl_order = 1
+    bl_category    = "GestureBone"
+    bl_order       = 1
 
     def draw(self, context):
-        layout = self.layout
-        props = context.scene.gesturebone_props
-        arm = props.current_armature
+        layout    = self.layout
+        scene_gp  = context.scene.gesturebone_props
+        arm       = scene_gp.current_armature
 
         if arm is None:
             row = layout.row()
             row.alert = True
-            row.label(text="Select an Armature", icon='ERROR')
-        else:
-            layout.label(text=arm.name, icon='ARMATURE_DATA')
-            mod_props = getattr(arm, 'gesturebone_gesture_draw_props', None)
-            if mod_props:
-                for chain in mod_props.chains:
-                    if chain.is_bound:
-                        continue
-                    has_spline = chain.part_gesture_spline is not None
-                    has_bones = any(entry.bone for entry in chain.part_control_bones)
-                    if has_spline and has_bones:
-                        continue
-                    row = layout.row()
-                    row.alert = True
-                    row.label(text=f"Unbound: {chain.part_name}", icon='UNLINKED')
+            row.label(text="Select a Plotting or Gesture rig", icon='ERROR')
+            return
 
-        if props.debug_mode:
+        arm_props = arm.gesturebone_props
+        rig_type  = arm_props.rig_type
+
+        # ── Armature name header ──────────────────────────────────────────────
+        name_row = layout.row(align=True)
+        name_row.label(text=arm.name, icon='ARMATURE_DATA')
+        type_label = {
+            'PLOTTING': "PLOTTING",
+            'GESTURE':  "GESTURE",
+            'PRESET':   "PRESET",
+            'NONE':     "Untagged",
+        }.get(rig_type, "Untagged")
+        name_row.label(text=f"· {type_label}")
+
+        layout.separator(factor=0.3)
+
+        # ── Dispatch ─────────────────────────────────────────────────────────
+        if rig_type == 'PLOTTING':
+            try:
+                from .modules.plotting.ui import draw_plotting_ui
+                draw_plotting_ui(layout, context, arm)
+            except ImportError:
+                layout.label(text="plotting module not loaded", icon='ERROR')
+
+        elif rig_type == 'GESTURE':
+            try:
+                from .modules.gesture.ui import draw_gesture_ui
+                draw_gesture_ui(layout, context, arm)
+            except ImportError:
+                layout.label(text="gesture module not loaded", icon='ERROR')
+
+        elif rig_type == 'PRESET':
+            box = layout.box()
+            box.label(text="Preset armature", icon='BOOKMARKS')
+            box.label(text="Appears in the Create Rig dropdown", icon='INFO')
+
+        else:  # NONE / untagged
+            box = layout.box()
+            box.label(text="Untagged armature", icon='INFO')
+            box.label(text="Use Extra Infos panel to tag this rig")
+
+        # ── Debug: armature override ──────────────────────────────────────────
+        if scene_gp.debug_mode:
+            layout.separator()
             col = layout.column(align=True)
-            col.label(text="Overrides:", text_ctxt="extra-info-label")
-            col.prop(props, "current_armature", text="Armature")
-            col.prop(props, "current_gestureSpline", text="Gesture Spline")
+            col.label(text="Overrides:", icon='TOOL_SETTINGS')
+            col.prop(scene_gp, "current_armature", text="Armature")
 
 
 def register():

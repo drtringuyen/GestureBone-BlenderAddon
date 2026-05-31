@@ -4,10 +4,11 @@ import os
 _CONFIG_PATH = os.path.join(os.path.dirname(__file__), "modules_config.json")
 _LOADED = {}
 
-# Add new modules here — panels.py iterates this list automatically
+# Add new modules here — panels.py iterates this list automatically.
+# shared is always loaded via __init__.py, not here.
 ALL_MODULES = [
-    {"name": "gesture_draw", "op": "gesturebone.toggle_gesture_draw", "icon": "GREASEPENCIL"},
-    {"name": "rig_generation", "op": "gesturebone.toggle_rig_generation", "icon": "ARMATURE_DATA"},
+    {"name": "plotting", "op": "gesturebone.toggle_plotting", "icon": "ARMATURE_DATA"},
+    {"name": "gesture",  "op": "gesturebone.toggle_gesture",  "icon": "GREASEPENCIL"},
 ]
 
 

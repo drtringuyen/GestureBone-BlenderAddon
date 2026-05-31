@@ -21,11 +21,6 @@ class GESTUREBONEProperties(bpy.types.PropertyGroup):
         type=bpy.types.Object,
         poll=lambda self, obj: obj.type == 'ARMATURE',
     )
-    current_gestureSpline: PointerProperty(
-        name="Current Gesture Spline",
-        type=bpy.types.Object,
-        poll=lambda self, obj: obj.type == 'CURVE',
-    )
 
 
 def register():

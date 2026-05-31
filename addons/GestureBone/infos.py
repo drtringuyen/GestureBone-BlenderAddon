@@ -16,9 +16,8 @@ def _read_build_info():
 
 
 class GESTUREBONE_OT_Build(bpy.types.Operator):
-    """Show addon info and last build time"""
     bl_idname = "gesturebone.build"
-    bl_label = "Build"
+    bl_label  = "Build"
 
     def invoke(self, context, event):
         return context.window_manager.invoke_popup(self, width=300)
@@ -35,17 +34,15 @@ class GESTUREBONE_OT_Build(bpy.types.Operator):
         if build:
             layout.label(text="Last built: " + build.get("time", "Unknown"), icon='TIME')
         else:
-            layout.label(text="Not built yet - run install.py first", icon='ERROR')
+            layout.label(text="Not built yet — run install.py first", icon='ERROR')
 
     def execute(self, context):
         return {'FINISHED'}
 
 
 class GESTUREBONE_OT_Reload(bpy.types.Operator):
-    """Reload GestureBone addon in Blender (disable → purge modules → enable).
-    Use this to apply in-place changes without running install.py."""
     bl_idname = "gesturebone.reload"
-    bl_label = "Reload Addon"
+    bl_label  = "Reload Addon"
 
     def execute(self, context):
         import sys
@@ -59,9 +56,8 @@ class GESTUREBONE_OT_Reload(bpy.types.Operator):
 
 
 class GESTUREBONE_OT_ToggleDebug(bpy.types.Operator):
-    """Toggle debug mode - show/hide extra-info-label"""
     bl_idname = "gesturebone.toggle_debug"
-    bl_label = "Debug"
+    bl_label  = "Debug"
 
     def execute(self, context):
         props = context.scene.gesturebone_props
@@ -71,9 +67,8 @@ class GESTUREBONE_OT_ToggleDebug(bpy.types.Operator):
 
 
 class GESTUREBONE_OT_ToggleConsole(bpy.types.Operator):
-    """Toggle Blender system console"""
     bl_idname = "gesturebone.toggle_console"
-    bl_label = "Console"
+    bl_label  = "Console"
 
     def execute(self, context):
         import sys
@@ -82,20 +77,15 @@ class GESTUREBONE_OT_ToggleConsole(bpy.types.Operator):
                 bpy.ops.wm.console_toggle()
             except AttributeError:
                 import subprocess
-                subprocess.Popen(
-                    'start cmd',
-                    shell=True,
-                    creationflags=subprocess.DETACHED_PROCESS
-                )
+                subprocess.Popen('start cmd', shell=True, creationflags=subprocess.DETACHED_PROCESS)
         else:
             self.report({'INFO'}, "Use Window > Toggle System Console")
         return {'FINISHED'}
 
 
 class GESTUREBONE_OT_ClearConsole(bpy.types.Operator):
-    """Clear the system console output"""
     bl_idname = "gesturebone.clear_console"
-    bl_label = "Clear"
+    bl_label  = "Clear"
 
     def execute(self, context):
         import sys
@@ -103,45 +93,42 @@ class GESTUREBONE_OT_ClearConsole(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class GESTUREBONE_OT_ToggleGestureDraw(bpy.types.Operator):
-    """Toggle GestureDraw module on/off"""
-    bl_idname = "gesturebone.toggle_gesture_draw"
-    bl_label = "GestureDraw"
+class GESTUREBONE_OT_TogglePlotting(bpy.types.Operator):
+    bl_idname = "gesturebone.toggle_plotting"
+    bl_label  = "Plotting"
 
     def execute(self, context):
         from . import module_manager
-        module_manager.toggle("gesture_draw")
+        module_manager.toggle("plotting")
         return {'FINISHED'}
 
 
-
-
-
-class GESTUREBONE_OT_ToggleRigGeneration(bpy.types.Operator):
-    """Toggle RigGeneration module on/off"""
-    bl_idname = "gesturebone.toggle_rig_generation"
-    bl_label = "RigGeneration"
+class GESTUREBONE_OT_ToggleGesture(bpy.types.Operator):
+    bl_idname = "gesturebone.toggle_gesture"
+    bl_label  = "Gesture"
 
     def execute(self, context):
         from . import module_manager
-        module_manager.toggle("rig_generation")
+        module_manager.toggle("gesture")
         return {'FINISHED'}
+
+
+_classes = [
+    GESTUREBONE_OT_Build,
+    GESTUREBONE_OT_Reload,
+    GESTUREBONE_OT_ToggleDebug,
+    GESTUREBONE_OT_ToggleConsole,
+    GESTUREBONE_OT_ClearConsole,
+    GESTUREBONE_OT_TogglePlotting,
+    GESTUREBONE_OT_ToggleGesture,
+]
+
 
 def register():
-    bpy.utils.register_class(GESTUREBONE_OT_Build)
-    bpy.utils.register_class(GESTUREBONE_OT_Reload)
-    bpy.utils.register_class(GESTUREBONE_OT_ToggleDebug)
-    bpy.utils.register_class(GESTUREBONE_OT_ToggleConsole)
-    bpy.utils.register_class(GESTUREBONE_OT_ClearConsole)
-    bpy.utils.register_class(GESTUREBONE_OT_ToggleGestureDraw)
-    bpy.utils.register_class(GESTUREBONE_OT_ToggleRigGeneration)
+    for cls in _classes:
+        bpy.utils.register_class(cls)
 
 
 def unregister():
-    bpy.utils.unregister_class(GESTUREBONE_OT_ToggleRigGeneration)
-    bpy.utils.unregister_class(GESTUREBONE_OT_ToggleGestureDraw)
-    bpy.utils.unregister_class(GESTUREBONE_OT_ClearConsole)
-    bpy.utils.unregister_class(GESTUREBONE_OT_ToggleConsole)
-    bpy.utils.unregister_class(GESTUREBONE_OT_ToggleDebug)
-    bpy.utils.unregister_class(GESTUREBONE_OT_Reload)
-    bpy.utils.unregister_class(GESTUREBONE_OT_Build)
+    for cls in reversed(_classes):
+        bpy.utils.unregister_class(cls)

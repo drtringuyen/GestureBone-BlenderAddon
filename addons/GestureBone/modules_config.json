@@ -1,1 +1,4 @@
-{}
+{
+  "plotting": true,
+  "gesture": true
+}

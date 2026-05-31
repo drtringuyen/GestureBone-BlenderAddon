@@ -35,6 +35,10 @@ def register():
     panels.register()
     extra_infos.register()
 
+    # shared must be registered before plotting and gesture modules
+    from .modules import shared
+    shared.register()
+
     from . import module_manager
     module_manager.load_all()
 
@@ -48,6 +52,9 @@ def unregister():
 
     from . import module_manager
     module_manager.unload_all()
+
+    from .modules import shared
+    shared.unregister()
 
     from . import properties, infos, panels, extra_infos
     extra_infos.unregister()

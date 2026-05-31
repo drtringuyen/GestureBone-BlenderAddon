@@ -1,3 +1,6 @@
+"""
+extra_infos.py — Tagging operators for Rig Preset, BoneChain Template, and Gesture Rig.
+"""
 import bpy
 
 TAG_SAMPLE_RIG     = "gesturebone_rig_preset"
@@ -18,6 +21,7 @@ def _extra_infos_on(context):
 # ── Operators ─────────────────────────────────────────────────────────────────
 
 class GESTUREBONE_OT_TagSampleRig(bpy.types.Operator):
+    """Toggle Rig Preset tag (rig_type = PRESET)"""
     bl_idname  = "gesturebone.tag_sample_rig"
     bl_label   = "Tag Rig Preset"
     bl_options = {'REGISTER', 'UNDO'}
@@ -27,14 +31,23 @@ class GESTUREBONE_OT_TagSampleRig(bpy.types.Operator):
         if not obj or obj.type != 'ARMATURE':
             self.report({'ERROR'}, "Active object must be an Armature")
             return {'CANCELLED'}
-        if TAG_SAMPLE_RIG in obj:
-            del obj[TAG_SAMPLE_RIG]
+        # Toggle: if currently PRESET → set NONE, else set PRESET
+        arm_props = obj.gesturebone_props
+        if arm_props.rig_type == 'PRESET':
+            arm_props.rig_type = 'NONE'
+            if TAG_SAMPLE_RIG in obj:
+                del obj[TAG_SAMPLE_RIG]
         else:
-            obj[TAG_SAMPLE_RIG] = True
+            arm_props.rig_type  = 'PRESET'
+            obj[TAG_SAMPLE_RIG] = True  # backward compat
+            # Clear other tags
+            if TAG_GESTURE_RIGGED in obj:
+                del obj[TAG_GESTURE_RIGGED]
         return {'FINISHED'}
 
 
 class GESTUREBONE_OT_TagTemplate(bpy.types.Operator):
+    """Toggle BoneChain Template tag on the active collection"""
     bl_idname  = "gesturebone.tag_template"
     bl_label   = "Tag BoneChain Template"
     bl_options = {'REGISTER', 'UNDO'}
@@ -51,9 +64,10 @@ class GESTUREBONE_OT_TagTemplate(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class GESTUREBONE_OT_TagGestureRigged(bpy.types.Operator):
-    bl_idname  = "gesturebone.tag_gesture_rigged"
-    bl_label   = "Tag Gesture Rigged"
+class GESTUREBONE_OT_TagGestureRig(bpy.types.Operator):
+    """Toggle Gesture Rig (PLOTTING) tag — renamed from TagGestureRigged"""
+    bl_idname  = "gesturebone.tag_gesture_rig"
+    bl_label   = "Tag Gesture Rig"
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
@@ -61,10 +75,16 @@ class GESTUREBONE_OT_TagGestureRigged(bpy.types.Operator):
         if not obj or obj.type != 'ARMATURE':
             self.report({'ERROR'}, "Active object must be an Armature")
             return {'CANCELLED'}
-        if TAG_GESTURE_RIGGED in obj:
-            del obj[TAG_GESTURE_RIGGED]
+        arm_props = obj.gesturebone_props
+        if arm_props.rig_type == 'PLOTTING':
+            arm_props.rig_type = 'NONE'
+            if TAG_GESTURE_RIGGED in obj:
+                del obj[TAG_GESTURE_RIGGED]
         else:
-            obj[TAG_GESTURE_RIGGED] = True
+            arm_props.rig_type       = 'PLOTTING'
+            obj[TAG_GESTURE_RIGGED]  = True  # backward compat
+            if TAG_SAMPLE_RIG in obj:
+                del obj[TAG_SAMPLE_RIG]
         return {'FINISHED'}
 
 
@@ -92,29 +112,33 @@ class GESTUREBONE_PT_ExtraInfos(bpy.types.Panel):
         col.label(text="Active Object", icon='OBJECT_DATA')
         box = col.box()
         if obj and obj.type == 'ARMATURE':
-            # Sample Rig tag
-            tagged_sample = TAG_SAMPLE_RIG in obj
+            arm_props = obj.gesturebone_props
+            rig_type  = arm_props.rig_type
+
             row = box.row(align=True)
             row.label(text=obj.name, icon='ARMATURE_DATA')
-            sr = row.row(align=True)
-            sr.active_default = tagged_sample
+            row.label(text=f"[{rig_type}]")
+
+            # Tag as Rig Preset (PRESET)
+            is_preset  = (rig_type == 'PRESET')
+            sr = box.row(align=True)
+            sr.active_default = is_preset
             sr.operator(
                 "gesturebone.tag_sample_rig",
-                text="Rig Preset" + (" ✓" if tagged_sample else ""),
-                icon='CHECKMARK' if tagged_sample else 'RADIOBUT_OFF',
-                depress=tagged_sample,
+                text="Rig Preset" + (" ✓" if is_preset else ""),
+                icon='CHECKMARK' if is_preset else 'RADIOBUT_OFF',
+                depress=is_preset,
             )
-            # GestureRigged tag
-            tagged_rigged = TAG_GESTURE_RIGGED in obj
-            row2 = box.row(align=True)
-            row2.label(text="", icon='BLANK1')
-            gr = row2.row(align=True)
-            gr.active_default = tagged_rigged
+
+            # Tag as Gesture Rig (PLOTTING)
+            is_plotting = (rig_type == 'PLOTTING')
+            gr = box.row(align=True)
+            gr.active_default = is_plotting
             gr.operator(
-                "gesturebone.tag_gesture_rigged",
-                text="GestureRigged" + (" ✓" if tagged_rigged else ""),
-                icon='CHECKMARK' if tagged_rigged else 'RADIOBUT_OFF',
-                depress=tagged_rigged,
+                "gesturebone.tag_gesture_rig",
+                text="Gesture Rig" + (" ✓" if is_plotting else ""),
+                icon='CHECKMARK' if is_plotting else 'RADIOBUT_OFF',
+                depress=is_plotting,
             )
         else:
             row = box.row()
@@ -128,9 +152,12 @@ class GESTUREBONE_PT_ExtraInfos(bpy.types.Panel):
         col.label(text="Active Collection", icon='OUTLINER_COLLECTION')
         box = col.box()
         if coll:
-            tagged = TAG_TEMPLATE in coll
-            row = box.row(align=True)
-            row.label(text=coll.name, icon='COLLECTION_COLOR_01' if tagged else 'OUTLINER_COLLECTION')
+            tagged  = TAG_TEMPLATE in coll
+            row     = box.row(align=True)
+            row.label(
+                text=coll.name,
+                icon='COLLECTION_COLOR_01' if tagged else 'OUTLINER_COLLECTION',
+            )
             op_row = row.row(align=True)
             op_row.active_default = tagged
             op_row.operator(
@@ -148,14 +175,13 @@ class GESTUREBONE_PT_ExtraInfos(bpy.types.Panel):
 _classes = [
     GESTUREBONE_OT_TagSampleRig,
     GESTUREBONE_OT_TagTemplate,
-    GESTUREBONE_OT_TagGestureRigged,
+    GESTUREBONE_OT_TagGestureRig,
     GESTUREBONE_PT_ExtraInfos,
 ]
 
 
 def register():
     for cls in _classes:
-        # Wipe every stale registration of this bl_idname before re-registering
         if hasattr(cls, 'bl_idname'):
             for stale in [c for c in bpy.types.Panel.__subclasses__()
                           if getattr(c, 'bl_idname', '') == cls.bl_idname]:

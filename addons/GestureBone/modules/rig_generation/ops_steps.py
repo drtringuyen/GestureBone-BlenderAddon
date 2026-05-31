@@ -8,6 +8,7 @@ from .utils import (
     _move_obj_to_coll, _ensure_object_mode, _clean, _rename_coll_tree,
     _all_bone_colls,
 )
+from .scene_props import _get_bone_settings
 
 
 # ─── STEP 1 ───────────────────────────────────────────────────────────────────
@@ -512,6 +513,8 @@ class GESTUREBONE_OT_FinishMerging(bpy.types.Operator):
                         _move_obj_to_coll(obj, gesture_splines_coll)
                 elif obj.type == 'MESH':
                     _move_obj_to_coll(obj, sample_coll)
+                    entry = _get_bone_settings(props, bone_name)
+                    entry.sample_mesh = obj
             _delete_coll(wip)
             props.wip_coll = ''
 

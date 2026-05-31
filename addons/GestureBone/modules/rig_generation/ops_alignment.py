@@ -28,8 +28,8 @@ def _alignment_scale_handler(scene, depsgraph):
         head_w = arm_eval.matrix_world @ pb.head
         tail_w = arm_eval.matrix_world @ pb.tail
         length = (tail_w - head_w).length
-        if abs(empty_obj.scale[0] - length) > 1e-6:
-            empty_obj.scale = (length, length, length)
+        if abs(empty_obj.scale[1] - length) > 1e-6:
+            empty_obj.scale[1] = length
     except Exception:
         pass
 
@@ -118,10 +118,11 @@ class GESTUREBONE_OT_ScaleEmptyToRestPose(bpy.types.Operator):
         head_w = arm_obj.matrix_world @ Vector(data_bone.head_local)
         tail_w = arm_obj.matrix_world @ Vector(data_bone.tail_local)
         world_length = (tail_w - head_w).length
+        bone_x_local = data_bone.matrix_local.col[0].xyz.length
 
-        empty_obj.scale = (world_length, world_length, world_length)
+        empty_obj.scale = (1.0, world_length, bone_x_local)
 
-        self.report({'INFO'}, f"Empty scaled to rest-pose length {world_length:.4f}")
+        self.report({'INFO'}, f"Empty scaled: x={bone_x_local:.4f} y={world_length:.4f} z=1.0")
         props.last_step      = self.bl_idname
         props.completed_step = 3
         return {'FINISHED'}
@@ -165,7 +166,15 @@ class GESTUREBONE_OT_AddAlignConstraints(bpy.types.Operator):
         con_rot.target    = arm_obj
         con_rot.subtarget = bone_name
 
-        self.report({'INFO'}, f"Copy Location + Copy Rotation added -> '{bone_name}'")
+        con_scl           = empty_obj.constraints.new('COPY_SCALE')
+        con_scl.name      = "GEN_CopyScaleZ"
+        con_scl.target    = arm_obj
+        con_scl.subtarget = bone_name
+        con_scl.use_x     = False
+        con_scl.use_y     = False
+        con_scl.use_z     = True
+
+        self.report({'INFO'}, f"Copy Location + Copy Rotation + Copy Scale Z added -> '{bone_name}'")
         props.last_step      = self.bl_idname
         props.completed_step = 4
         return {'FINISHED'}

@@ -48,6 +48,72 @@ def _get_bones_in_collection(arm_data, coll_name):
 
 
 
+def _switch_spline_direction(curve_obj):
+    """Reverse every spline in curve_obj using the data API.
+
+    Works regardless of whether the object is in the view layer, selected,
+    or in any particular mode.  Returns the number of splines reversed.
+    """
+    reversed_count = 0
+    for spline in curve_obj.data.splines:
+        if spline.type == 'BEZIER':
+            pts  = spline.bezier_points
+            n    = len(pts)
+            snap = [(
+                p.co.copy(),
+                p.handle_left.copy(),  p.handle_right.copy(),
+                p.handle_left_type,    p.handle_right_type,
+                p.radius, p.tilt, p.weight_softbody,
+            ) for p in pts]
+            for i, p in enumerate(pts):
+                co, hl, hr, ht_l, ht_r, rad, tilt, wsb = snap[n - 1 - i]
+                p.co                = co
+                p.handle_left       = hr    # left ↔ right swapped when reversed
+                p.handle_right      = hl
+                p.handle_left_type  = ht_r
+                p.handle_right_type = ht_l
+                p.radius            = rad
+                p.tilt              = tilt
+                p.weight_softbody   = wsb
+            reversed_count += 1
+        elif spline.type in ('NURBS', 'POLY'):
+            pts  = spline.points
+            n    = len(pts)
+            snap = [(p.co.copy(), p.radius, p.tilt, p.weight_softbody) for p in pts]
+            for i, p in enumerate(pts):
+                co, rad, tilt, wsb = snap[n - 1 - i]
+                p.co              = co
+                p.radius          = rad
+                p.tilt            = tilt
+                p.weight_softbody = wsb
+            reversed_count += 1
+    curve_obj.data.update_tag()
+    return reversed_count
+
+
+class GESTUREBONE_OT_SwitchCurveDirection(bpy.types.Operator):
+    """Reverse the direction of the gesture spline for this chain"""
+    bl_idname  = "gesturebone.switch_curve_direction"
+    bl_label   = "Switch Curve Direction"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    chain_index: IntProperty()
+
+    def execute(self, context):
+        mod_props = _mod_props(context)
+        if mod_props is None or not (0 <= self.chain_index < len(mod_props.chains)):
+            return {'CANCELLED'}
+        chain  = mod_props.chains[self.chain_index]
+        spline = chain.part_gesture_spline
+        if spline is None:
+            self.report({'WARNING'}, "No gesture spline assigned to this chain")
+            return {'CANCELLED'}
+
+        n = _switch_spline_direction(spline)
+        self.report({'INFO'}, f"Switched direction of '{spline.name}' ({n} spline(s))")
+        return {'FINISHED'}
+
+
 class GESTUREBONE_OT_LoadChainsFromMetaRig(bpy.types.Operator):
     """Clear chains and rebuild one per MetaBone, linking existing splines and control bones"""
     bl_idname = "gesturebone.load_chains_from_meta_rig"
@@ -298,6 +364,7 @@ class GESTUREBONE_OT_RefreshAllChains(bpy.types.Operator):
 
 
 def register():
+    bpy.utils.register_class(GESTUREBONE_OT_SwitchCurveDirection)
     bpy.utils.register_class(GESTUREBONE_OT_LoadChainsFromMetaRig)
     bpy.utils.register_class(GESTUREBONE_OT_RemoveChain)
     bpy.utils.register_class(GESTUREBONE_OT_MoveChain)
@@ -311,3 +378,4 @@ def unregister():
     bpy.utils.unregister_class(GESTUREBONE_OT_MoveChain)
     bpy.utils.unregister_class(GESTUREBONE_OT_RemoveChain)
     bpy.utils.unregister_class(GESTUREBONE_OT_LoadChainsFromMetaRig)
+    bpy.utils.unregister_class(GESTUREBONE_OT_SwitchCurveDirection)

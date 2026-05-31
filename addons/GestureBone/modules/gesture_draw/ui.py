@@ -191,6 +191,9 @@ class GESTUREBONE_PT_GestureDrawGestures(bpy.types.Panel):
             op = row.operator("gesturebone.apply_to_bone", text="", icon='SORT_ASC')
             op.chain_index = i
 
+            op = row.operator("gesturebone.switch_curve_direction", text="", icon='TRACKING')
+            op.chain_index = i
+
             op = row.operator("gesturebone.delete_baked_frames", text="", icon='KEY_DEHLT')
             op.chain_index = i
 

@@ -36,9 +36,23 @@ class GESTUREBONE_PT_RigGeneration(bpy.types.Panel):
         props  = _p(context)
 
         # ── Registration ──────────────────────────────────────────────────────
+        global_props = getattr(context.scene, 'gesturebone_props', None)
+        debug_mode   = getattr(global_props, 'debug_mode', False) if global_props else False
+
         box = layout.box()
         box.label(text="Registration", icon='PROPERTIES')
         col = box.column(align=True)
+
+        # MetaRig Template + Create Rig
+        tmpl_row = col.row(align=True)
+        if debug_mode:
+            tmpl_sub = tmpl_row.row(align=True)
+            tmpl_sub.scale_x = 3.0
+            tmpl_sub.prop(props, "meta_rig_template", text="", icon='ARMATURE_DATA')
+            tmpl_row.operator("gesturebone.load_template_rig", text="", icon='IMPORT')
+        tmpl_row.operator("gesturebone.create_rig", text="Create Rig")
+        col.separator()
+
         split = col.split(factor=0.5)
         split.label(text="Default Template")
         split.prop(props, "atomic_chain", text="")
@@ -48,6 +62,7 @@ class GESTUREBONE_PT_RigGeneration(bpy.types.Panel):
         split = col.split(factor=0.5)
         split.label(text="Meta Collection")
         split.prop(props, "meta_collection", text="")
+
         col.separator()
 
         # MetaBone + Control Mode quick-access row (above Auto Rig)
@@ -67,6 +82,13 @@ class GESTUREBONE_PT_RigGeneration(bpy.types.Panel):
             sub       = row.row(align=True)
             sub.alert = True
             sub.operator("gesturebone.init_bone_control_mode", text="", icon='SETTINGS')
+
+        # Bind to Mesh row (only when this bone has settings)
+        if mode_ready:
+            bind_row = col.row(align=True)
+            bind_row.prop(entry, "bind_mesh", text="")
+            op = bind_row.operator("gesturebone.bind_to_mesh", text="", icon='MESH_DATA')
+            op.bone_name = bone_name
 
         col.separator()
 
@@ -114,9 +136,6 @@ class GESTUREBONE_PT_RigGeneration(bpy.types.Panel):
                           depress=pivot_active)
 
         # ── Debug-only sections ───────────────────────────────────────────────
-        global_props = getattr(context.scene, 'gesturebone_props', None)
-        debug_mode   = getattr(global_props, 'debug_mode', False) if global_props else False
-
         if debug_mode:
             layout.separator()
 

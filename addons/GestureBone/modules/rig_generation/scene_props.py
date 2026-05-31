@@ -5,6 +5,10 @@ from bpy.props import (
 )
 from .utils import _bones_in_bone_coll
 
+
+def _mesh_object_poll(self, obj):
+    return obj.type == 'MESH'
+
 # ── Control Mode constants (shared with ops_actions) ──────────────────────────
 
 CONTROL_MODES = [
@@ -134,14 +138,28 @@ class GESTUREBONE_PG_MetaBoneSettings(bpy.types.PropertyGroup):
         ],
         default='ORIGIN',
     )
+    bind_mesh: PointerProperty(
+        type=bpy.types.Object,
+        name="Bind to Mesh",
+        description="Source mesh to copy into this bone's Sample Mesh",
+        poll=_mesh_object_poll,
+    )
+    sample_mesh: PointerProperty(
+        type=bpy.types.Object,
+        name="Sample Mesh",
+        description="Auto-set in Step 9 — the generated sample mesh for this bone",
+    )
 
 
 class GESTUREBONE_PG_RigGenerationProps(bpy.types.PropertyGroup):
-    atomic_chain:     StringProperty(name="Template",         search=_collection_search)
-    meta_rig:         StringProperty(name="Meta Rig",        default="MetaRig",
-                                     search=_armature_name_search)
-    meta_collection:  StringProperty(name="Meta Collection", default="MetaCollection",
-                                     search=_bone_coll_name_search)
+    atomic_chain:       StringProperty(name="Template",           search=_collection_search)
+    meta_rig:           StringProperty(name="Meta Rig",           default="MetaRig",
+                                       search=_armature_name_search)
+    meta_collection:    StringProperty(name="Meta Collection",    default="MetaCollection",
+                                       search=_bone_coll_name_search)
+    meta_rig_template:  StringProperty(name="MetaRig Template",
+                                       description="Armature to duplicate when creating a new rig",
+                                       search=_armature_name_search)
     active_meta_bone: EnumProperty( name="Meta Bone",        items=_metabone_items,
                                     update=_on_active_meta_bone_update)
     wip_coll:         StringProperty(options={'HIDDEN'})

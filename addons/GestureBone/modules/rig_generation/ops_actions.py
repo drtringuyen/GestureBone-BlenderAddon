@@ -2,8 +2,14 @@
 ops_actions.py — Compound actions: Rig Part, Auto Rig, and utility buttons.
 """
 import bpy
+import bmesh
+import os
+from bpy.props import StringProperty
 from .utils import _p, _meta_rig, _bones_in_bone_coll, _ensure_object_mode, _delete_coll, _all_bone_colls
-from .scene_props import CONTROL_MODE_GN_INT, _get_bone_settings
+from .scene_props import CONTROL_MODE_GN_INT, _get_bone_settings, _collection_search
+
+
+_ADDON_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 # Steps run by RigPart (Step 5 is interactive — skipped)
@@ -530,6 +536,167 @@ class GESTUREBONE_OT_ToggleMetaCollection(bpy.types.Operator):
         return {'FINISHED'}
 
 
+# ─── BIND TO MESH ─────────────────────────────────────────────────────────────
+
+class GESTUREBONE_OT_BindToMesh(bpy.types.Operator):
+    bl_idname      = "gesturebone.bind_to_mesh"
+    bl_label       = "Bind to Mesh"
+    bl_description = "Copy geometry and materials from Bind_to_Mesh into this bone's Sample Mesh"
+    bl_options     = {'REGISTER', 'UNDO'}
+
+    bone_name: StringProperty()
+
+    def execute(self, context):
+        props = _p(context)
+        entry = props.bone_settings.get(self.bone_name)
+        if entry is None:
+            self.report({'ERROR'}, f"No settings for bone '{self.bone_name}'")
+            return {'CANCELLED'}
+
+        bind_mesh = entry.bind_mesh
+        if bind_mesh is None:
+            return {'FINISHED'}   # silent no-op as specified
+
+        sample_mesh = entry.sample_mesh
+        if sample_mesh is None:
+            self.report({'ERROR'}, "Sample Mesh not set — run Steps 1–9 first")
+            return {'CANCELLED'}
+
+        # 1. Ensure 'Mesh' collection; link source mesh there (never move/duplicate it)
+        mesh_coll = bpy.data.collections.get("Mesh")
+        if mesh_coll is None:
+            mesh_coll = bpy.data.collections.new("Mesh")
+            context.scene.collection.children.link(mesh_coll)
+        if bind_mesh.name not in mesh_coll.objects:
+            mesh_coll.objects.link(bind_mesh)
+
+        # 2. Use bmesh API — no view-layer membership required for either object.
+        #    Transform bind_mesh vertices from its world space into sample_mesh local
+        #    space so the geometry lands at the correct world position after the copy.
+        world_to_local = sample_mesh.matrix_world.inverted() @ bind_mesh.matrix_world
+        bm = bmesh.new()
+        bm.from_mesh(bind_mesh.data)
+        bmesh.ops.transform(bm, matrix=world_to_local, verts=bm.verts)
+
+        # 3. Write the transformed geometry onto sample_mesh, replacing old geometry.
+        #    Vertex group NAMES on the sample_mesh object are left untouched — only
+        #    the underlying geometry is swapped, so GN references by name still work.
+        bm.to_mesh(sample_mesh.data)
+        bm.free()
+        sample_mesh.data.update()
+
+        # 4. Materials: clear and copy from bind_mesh
+        sample_mesh.data.materials.clear()
+        for mat in bind_mesh.data.materials:
+            sample_mesh.data.materials.append(mat)
+
+        self.report({'INFO'}, f"Bound '{bind_mesh.name}' → '{sample_mesh.name}'")
+        return {'FINISHED'}
+
+
+# ─── CREATE RIG ───────────────────────────────────────────────────────────────
+
+class GESTUREBONE_OT_CreateRig(bpy.types.Operator):
+    bl_idname      = "gesturebone.create_rig"
+    bl_label       = "Create Rig"
+    bl_description = "Duplicate the MetaRig Template into a new named armature"
+    bl_options     = {'REGISTER', 'UNDO'}
+
+    new_rig_name:       StringProperty(name="New Rig Name", default="MyRig")
+    new_rig_collection: StringProperty(name="Collection",   search=_collection_search)
+
+    def invoke(self, context, event):
+        props = _p(context)
+        if not props.meta_rig_template:
+            self.report({'ERROR'}, "Set a MetaRig Template first")
+            return {'CANCELLED'}
+        return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, context):
+        col = self.layout.column()
+        col.prop(self, "new_rig_name")
+        col.prop(self, "new_rig_collection")
+        coll_name = self.new_rig_collection.strip()
+        if coll_name:
+            exists = bpy.data.collections.get(coll_name) is not None
+            info_row = col.row()
+            info_row.label(
+                text="Collection exists" if exists else "New collection will be created",
+                icon='CHECKMARK' if exists else 'ADD',
+            )
+
+    def execute(self, context):
+        props    = _p(context)
+        template = bpy.data.objects.get(props.meta_rig_template)
+        if not template or template.type != 'ARMATURE':
+            self.report({'ERROR'}, f"Template '{props.meta_rig_template}' not found or not an armature")
+            return {'CANCELLED'}
+
+        name = self.new_rig_name.strip()
+        if not name:
+            self.report({'ERROR'}, "New rig name cannot be empty")
+            return {'CANCELLED'}
+
+        _ensure_object_mode(context)
+        bpy.ops.object.select_all(action='DESELECT')
+        template.hide_set(False)
+        template.select_set(True)
+        context.view_layer.objects.active = template
+        bpy.ops.object.duplicate()
+
+        new_obj      = context.active_object
+        new_obj.name = name
+        new_obj.data = new_obj.data.copy()
+        new_obj.data.name = name
+
+        coll_name = self.new_rig_collection.strip()
+        if coll_name:
+            target_coll = bpy.data.collections.get(coll_name)
+            if target_coll is None:
+                target_coll = bpy.data.collections.new(coll_name)
+                context.scene.collection.children.link(target_coll)
+            for c in list(new_obj.users_collection):
+                c.objects.unlink(new_obj)
+            target_coll.objects.link(new_obj)
+
+        self.report({'INFO'}, f"Created rig '{name}'")
+        return {'FINISHED'}
+
+
+# ─── LOAD TEMPLATE RIG ────────────────────────────────────────────────────────
+
+class GESTUREBONE_OT_LoadTemplateRig(bpy.types.Operator):
+    bl_idname      = "gesturebone.load_template_rig"
+    bl_label       = "Load Template Rig"
+    bl_description = "Append the bundled MetaRig template from the addon assets folder"
+    bl_options     = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        assets_path = os.path.join(_ADDON_DIR, "assets", "template_rig.blend")
+        if not os.path.exists(assets_path):
+            self.report({'ERROR'}, f"Template blend not found: {assets_path}")
+            return {'CANCELLED'}
+
+        with bpy.data.libraries.load(assets_path, link=False) as (data_from, data_to):
+            data_to.objects = list(data_from.objects)
+
+        appended = []
+        for obj in data_to.objects:
+            if obj and obj.type == 'ARMATURE':
+                if obj.name not in context.scene.collection.objects:
+                    context.scene.collection.objects.link(obj)
+                appended.append(obj.name)
+
+        if not appended:
+            self.report({'WARNING'}, "No armature objects found in template blend")
+            return {'CANCELLED'}
+
+        props = _p(context)
+        props.meta_rig_template = appended[0]
+        self.report({'INFO'}, f"Loaded template: {', '.join(appended)}")
+        return {'FINISHED'}
+
+
 # ─── REGISTER ─────────────────────────────────────────────────────────────────
 
 _classes = [
@@ -542,6 +709,9 @@ _classes = [
     GESTUREBONE_OT_ResetAllBonesStretch,
     GESTUREBONE_OT_TogglePivotRotation,
     GESTUREBONE_OT_ToggleMetaCollection,
+    GESTUREBONE_OT_BindToMesh,
+    GESTUREBONE_OT_CreateRig,
+    GESTUREBONE_OT_LoadTemplateRig,
 ]
 
 

@@ -293,8 +293,10 @@ class GESTUREBONE_PT_RigGeneration(bpy.types.Panel):
 
                 _bind_step("gesturebone.bind_step_move_collection",
                            "12a. Move Bind Mesh to Collection", 'COLLECTION_NEW', 11)
+                _bind_step("gesturebone.bind_step_sync_materials",
+                           "12b. Sync Materials to Sample",     'MATERIAL',       12)
                 _bind_step("gesturebone.bind_step_copy_geometry",
-                           "12b. Copy Geometry to Sample",      'MESH_DATA',      12)
+                           "12c. Copy Geometry to Sample",      'MESH_DATA',      13)
 
 
 def register():

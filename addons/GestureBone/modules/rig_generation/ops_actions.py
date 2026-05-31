@@ -620,9 +620,37 @@ class GESTUREBONE_OT_BindStepMoveCollection(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class GESTUREBONE_OT_BindStepSyncMaterials(bpy.types.Operator):
+    bl_idname      = "gesturebone.bind_step_sync_materials"
+    bl_label       = "12b. Sync Materials to Sample"
+    bl_description = (
+        "Clear all material slots on the sample mesh, then copy each material "
+        "from the bind mesh — run this before geometry copy"
+    )
+    bl_options = {'REGISTER', 'UNDO'}
+
+    bone_name: StringProperty(options={'HIDDEN'})
+
+    def execute(self, context):
+        try:
+            props, bind_mesh, sample_mesh = _bind_resolve(context, self.bone_name)
+        except ValueError as e:
+            self.report({'ERROR'}, str(e))
+            return {'CANCELLED'}
+
+        sample_mesh.data.materials.clear()
+        for mat in bind_mesh.data.materials:
+            sample_mesh.data.materials.append(mat)
+
+        props.last_step      = self.bl_idname
+        props.completed_step = 13
+        self.report({'INFO'}, f"Materials: {[m.name for m in bind_mesh.data.materials]} → '{sample_mesh.name}'")
+        return {'FINISHED'}
+
+
 class GESTUREBONE_OT_BindStepCopyGeometry(bpy.types.Operator):
     bl_idname      = "gesturebone.bind_step_copy_geometry"
-    bl_label       = "12b. Copy Geometry to Sample"
+    bl_label       = "12c. Copy Geometry to Sample"
     bl_description = (
         "Transform bind mesh vertices into sample mesh local space via bmesh, "
         "then write onto sample mesh data (replaces geometry, keeps vertex groups)"
@@ -655,7 +683,7 @@ class GESTUREBONE_OT_BindStepCopyGeometry(bpy.types.Operator):
 class GESTUREBONE_OT_BindToMesh(bpy.types.Operator):
     bl_idname      = "gesturebone.bind_to_mesh"
     bl_label       = "Bind to Mesh"
-    bl_description = "Run 12a + 12b in one shot (used by Auto Rig)"
+    bl_description = "Run 12a + 12b + 12c in one shot (used by Auto Rig)"
     bl_options     = {'REGISTER', 'UNDO'}
 
     bone_name: StringProperty()
@@ -670,6 +698,7 @@ class GESTUREBONE_OT_BindToMesh(bpy.types.Operator):
             return {'FINISHED'}   # silent no-op
 
         for idname in ("gesturebone.bind_step_move_collection",
+                       "gesturebone.bind_step_sync_materials",
                        "gesturebone.bind_step_copy_geometry"):
             ns, name = idname.split('.', 1)
             if 'CANCELLED' in getattr(getattr(bpy.ops, ns), name)(bone_name=self.bone_name):
@@ -1009,6 +1038,7 @@ _classes = [
     GESTUREBONE_OT_TogglePivotRotation,
     GESTUREBONE_OT_ToggleMetaCollection,
     GESTUREBONE_OT_BindStepMoveCollection,
+    GESTUREBONE_OT_BindStepSyncMaterials,
     GESTUREBONE_OT_BindStepCopyGeometry,
     GESTUREBONE_OT_BindToMesh,
     GESTUREBONE_OT_CreateRig,

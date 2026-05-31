@@ -833,6 +833,111 @@ class GESTUREBONE_OT_ToggleArmatureVisibility(bpy.types.Operator):
         return {'FINISHED'}
 
 
+# ─── APPEND ESSENTIALS ────────────────────────────────────────────────────────
+
+class GESTUREBONE_OT_AppendEssentials(bpy.types.Operator):
+    bl_idname      = "gesturebone.append_essentials"
+    bl_label       = "Refresh"
+    bl_description = "Append all data from essentials.blend and make any linked data local"
+    bl_options     = {'REGISTER', 'UNDO'}
+
+    # Name of the template collection inside essentials.blend
+    _TEMPLATE_COLL = "Atomic Chains"
+
+    def execute(self, context):
+        essentials_path = os.path.join(_ADDON_DIR, "essentials.blend")
+        if not os.path.exists(essentials_path):
+            self.report({'ERROR'}, f"essentials.blend not found: {essentials_path}")
+            return {'CANCELLED'}
+
+        essentials_abs = os.path.normcase(os.path.abspath(essentials_path))
+
+        # Step 1: Make any already-linked data from essentials.blend local
+        linked_libs = {
+            lib for lib in bpy.data.libraries
+            if os.path.normcase(os.path.abspath(bpy.path.abspath(lib.filepath))) == essentials_abs
+        }
+        made_local_libs = 0
+        if linked_libs:
+            _ensure_object_mode(context)
+            bpy.ops.object.select_all(action='DESELECT')
+            for obj in list(context.view_layer.objects):
+                if obj.library in linked_libs:
+                    obj.select_set(True)
+                    context.view_layer.objects.active = obj
+            bpy.ops.object.make_local(type='ALL')
+            bpy.ops.object.select_all(action='DESELECT')
+            made_local_libs = len(linked_libs)
+
+        appended_colls: list[str] = []
+        appended_ngs:   list[str] = []
+
+        with bpy.data.libraries.load(essentials_path, link=False) as (src, dst):
+            # Only append the Atomic Chains collection (brings child collections + objects)
+            if self._TEMPLATE_COLL in src.collections and \
+               self._TEMPLATE_COLL not in bpy.data.collections:
+                appended_colls = [self._TEMPLATE_COLL]
+                dst.collections = appended_colls[:]
+
+            # Append any node groups not already present (invisible — no scene clutter)
+            existing_ngs = set(bpy.data.node_groups.keys())
+            new_ngs = [n for n in src.node_groups if n not in existing_ngs]
+            if new_ngs:
+                appended_ngs = list(new_ngs)
+                dst.node_groups = new_ngs
+
+        # Step 3: Link Atomic Chains into scene if not already there
+        coll = bpy.data.collections.get(self._TEMPLATE_COLL)
+        if coll and self._TEMPLATE_COLL not in {c.name for c in context.scene.collection.children}:
+            context.scene.collection.children.link(coll)
+
+        # Step 4: Hide Atomic Chains (and all children) from viewport
+        def _hide_recursive(c):
+            c.hide_viewport = True
+            for child in c.children:
+                _hide_recursive(child)
+
+        if coll:
+            _hide_recursive(coll)
+            # Also hide via the view-layer layer_collection so the eye icon reflects it
+            def _find_lc(lc, name):
+                if lc.name == name:
+                    return lc
+                for child in lc.children:
+                    found = _find_lc(child, name)
+                    if found:
+                        return found
+                return None
+
+            lc = _find_lc(context.view_layer.layer_collection, self._TEMPLATE_COLL)
+            if lc:
+                lc.hide_viewport = True
+
+        # Step 5: Collapse Atomic Chains in the outliner
+        outliner = next(
+            (a for a in context.screen.areas if a.type == 'OUTLINER'), None
+        )
+        if outliner:
+            region = next((r for r in outliner.regions if r.type == 'WINDOW'), None)
+            if region:
+                with context.temp_override(area=outliner, region=region):
+                    for _ in range(6):  # collapse up to 6 nesting levels
+                        bpy.ops.outliner.show_one_level(open=False)
+
+        # Report
+        parts = []
+        if made_local_libs:
+            parts.append(f"made local ({made_local_libs} lib(s))")
+        if appended_colls:
+            parts.append(f"appended '{self._TEMPLATE_COLL}'")
+        if appended_ngs:
+            parts.append(f"{len(appended_ngs)} node group(s)")
+        if not parts:
+            parts.append("already up to date")
+        self.report({'INFO'}, f"Essentials refresh: {', '.join(parts)}")
+        return {'FINISHED'}
+
+
 # ─── REGISTER ─────────────────────────────────────────────────────────────────
 
 _classes = [
@@ -850,6 +955,7 @@ _classes = [
     GESTUREBONE_OT_LoadTemplateRig,
     GESTUREBONE_OT_SwitchArmature,
     GESTUREBONE_OT_ToggleArmatureVisibility,
+    GESTUREBONE_OT_AppendEssentials,
 ]
 
 

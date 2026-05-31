@@ -115,8 +115,19 @@ class GESTUREBONE_OT_ScaleEmptyToRestPose(bpy.types.Operator):
             self.report({'ERROR'}, f"Bone '{bone_name}' not found in MetaRig")
             return {'CANCELLED'}
 
-        head_w = arm_obj.matrix_world @ Vector(data_bone.head_local)
-        tail_w = arm_obj.matrix_world @ Vector(data_bone.tail_local)
+        # Use the evaluated pose bone so pose-level scale/transforms are included.
+        # The rest-pose data bone ignores pose scale — that's what caused the
+        # "half bone" bug when the MetaBone was scaled bigger in pose mode.
+        context.view_layer.update()
+        depsgraph = context.evaluated_depsgraph_get()
+        arm_eval  = arm_obj.evaluated_get(depsgraph)
+        pb_eval   = arm_eval.pose.bones.get(bone_name)
+        if not pb_eval:
+            self.report({'ERROR'}, f"Evaluated bone '{bone_name}' not found")
+            return {'CANCELLED'}
+
+        head_w       = arm_eval.matrix_world @ pb_eval.head
+        tail_w       = arm_eval.matrix_world @ pb_eval.tail
         world_length = (tail_w - head_w).length
         bone_x_local = data_bone.matrix_local.col[0].xyz.length
 

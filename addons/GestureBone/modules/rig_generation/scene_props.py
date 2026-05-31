@@ -52,9 +52,9 @@ def _scene_collections(context):
 
 
 def _collection_search(self, context, edit_text):
-    colls  = _scene_collections(context)
-    tagged = [c.name for c in colls if _TAG_TEMPLATE in c]
-    pool   = tagged if tagged else [c.name for c in colls]
+    # Tagged collections anywhere in bpy.data (not just the scene tree)
+    tagged = [c.name for c in bpy.data.collections if _TAG_TEMPLATE in c]
+    pool   = tagged if tagged else [c.name for c in _scene_collections(context)]
     if not edit_text:
         return pool
     lo = edit_text.lower()
@@ -184,7 +184,7 @@ class GESTUREBONE_PG_RigGenerationProps(bpy.types.PropertyGroup):
     meta_rig:           StringProperty(name="Meta Rig",           default="",
                                        search=_armature_name_search,
                                        update=_on_meta_rig_update)
-    meta_collection:    StringProperty(name="Meta Collection",    default="MetaCollection",
+    meta_collection:    StringProperty(name="Meta Collection",    default="META",
                                        search=_bone_coll_name_search)
     meta_rig_template:  StringProperty(name="MetaRig Template",
                                        description="Armature to duplicate when creating a new rig",

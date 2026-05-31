@@ -41,7 +41,9 @@ class GESTUREBONE_PT_RigGeneration(bpy.types.Panel):
         extra_infos     = getattr(global_props, 'extra_infos_mode', False) if global_props else False
 
         box = layout.box()
-        box.label(text="Registration", icon='PROPERTIES')
+        reg_header = box.row()
+        reg_header.label(text="Registration", icon='PROPERTIES')
+        reg_header.operator("gesturebone.append_essentials", text="Refresh", icon='FILE_REFRESH')
         col = box.column(align=True)
 
         # MetaRig Template + Create Rig

@@ -18,9 +18,9 @@ def _status_badge(chain):
     step = chain.rig_completed_step
     if step == 0:
         return "○ Not rigged", 'RADIOBUT_OFF', False
-    if step >= 14:
+    if step >= 11:
         return "✓ Rigged", 'CHECKMARK', False
-    return f"⚠ Step {step}/14", 'ERROR', True
+    return f"⚠ Step {step}/11", 'ERROR', True
 
 
 def draw_plotting_ui(layout, context, arm):

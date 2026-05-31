@@ -201,6 +201,12 @@ class GESTUREBONE_OT_CreateRig(bpy.types.Operator):
             mesh_coll = bpy.data.collections.new(mesh_coll_name)
             rig_coll.children.link(mesh_coll)
 
+        # Activate new_obj so _active_plotting_arm() resolves it correctly
+        _ensure_object_mode(context)
+        bpy.ops.object.select_all(action='DESELECT')
+        new_obj.select_set(True)
+        context.view_layer.objects.active = new_obj
+
         # Initialize chain list from META bones
         bpy.ops.gesturebone.sync_chains_from_meta_bones()
 

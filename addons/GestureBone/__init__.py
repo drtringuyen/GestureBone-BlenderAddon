@@ -14,18 +14,29 @@ import bpy
 
 @bpy.app.handlers.persistent
 def _track_active_armature(scene, depsgraph):
-    """Keep current_armature in sync with the active armature.
-    Only updates when the active object IS an armature — switching to GP or
-    any non-armature leaves the pointer unchanged so operators keep working
-    during drawing."""
+    """Keep current_armature pointing at the user's PLOTTING rig.
+
+    - PLOTTING rig selected → track it directly.
+    - GESTURE rig selected → track its plotting_rig back-pointer.
+    - NONE / PRESET / non-armature → leave current_armature unchanged so step
+      operators (which temporarily activate generated rigs) still resolve the
+      correct PLOTTING rig via the fallback in _active_plotting_arm().
+    """
     ctx = bpy.context
     obj = getattr(ctx, 'active_object', None)
-    if obj and obj.type == 'ARMATURE':
-        try:
-            props = scene.gesturebone_props
-            props.current_armature = obj
-        except Exception:
-            pass
+    if obj is None or obj.type != 'ARMATURE':
+        return
+    try:
+        gp    = scene.gesturebone_props
+        rtype = obj.gesturebone_props.rig_type
+        if rtype == 'PLOTTING':
+            gp.current_armature = obj
+        elif rtype == 'GESTURE':
+            plotting = obj.gesturebone_props.plotting_rig
+            if plotting and plotting.type == 'ARMATURE':
+                gp.current_armature = plotting
+    except Exception:
+        pass
 
 
 def register():

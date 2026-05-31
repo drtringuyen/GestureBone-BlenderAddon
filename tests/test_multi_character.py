@@ -73,7 +73,7 @@ class TestMultiCharacter(unittest.TestCase):
 
     def test_gesture_rig_reads_correct_chains(self):
         """Selecting CHR_Fox.Gesture only shows Fox chains, not Pig chains."""
-        from addons.GestureBone.modules.shared.utils import _chains_for_gesture_rig
+        from GestureBone.modules.shared.utils import _chains_for_gesture_rig
 
         pig_p,  pig_g  = _make_char("CHR_LittlePig", ["Body", "Arm.L"])
         fox_p,  fox_g  = _make_char("CHR_Fox",        ["Spine", "Ear.L"])

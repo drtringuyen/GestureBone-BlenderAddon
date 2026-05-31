@@ -251,6 +251,9 @@ class GESTUREBONE_OT_RefreshRigs(bpy.types.Operator):
             rig_obj.data      = arm.data.copy()
             rig_obj.name      = rig_name
             rig_obj.data.name = rig_name
+            # Must be NONE so the depsgraph handler does not mistake it for the
+            # user's PLOTTING rig when _strip_bones makes it the active object.
+            rig_obj.gesturebone_props.rig_type = 'NONE'
             for coll in target_colls:
                 coll.objects.link(rig_obj)
 

@@ -21,10 +21,20 @@ def _meta_arm(arm):
 
 
 def _active_plotting_arm(context):
-    """Return the active PLOTTING armature, or None."""
-    arm = _arm(context)
-    if arm and arm.gesturebone_props.rig_type == 'PLOTTING':
-        return arm
+    """Return the active PLOTTING armature, or None.
+
+    Checks active object first. Falls back to scene.gesturebone_props.current_armature
+    so that step operators (which change the active object while processing template
+    armatures) still resolve the correct PLOTTING rig throughout a multi-step run.
+    """
+    obj = context.active_object
+    if obj and obj.type == 'ARMATURE' and obj.gesturebone_props.rig_type == 'PLOTTING':
+        return obj
+    # Fallback: current_armature is kept in sync by the depsgraph handler and
+    # is not changed when operators switch the active object internally.
+    fallback = getattr(getattr(context.scene, 'gesturebone_props', None), 'current_armature', None)
+    if fallback and fallback.type == 'ARMATURE' and fallback.gesturebone_props.rig_type == 'PLOTTING':
+        return fallback
     return None
 
 

@@ -23,6 +23,17 @@ def _build_label():
     return "Build"
 
 
+def _gesture_arm_for_spline(curve_obj):
+    """Return the GESTURE armature that owns curve_obj as a GestureSpline, or None."""
+    for obj in bpy.data.objects:
+        if obj.type != 'ARMATURE' or obj.gesturebone_props.rig_type != 'PLOTTING':
+            continue
+        for chain in obj.gesturebone_props.chains:
+            if chain.gesture_spline == curve_obj and chain.gesture_rig:
+                return chain.gesture_rig
+    return None
+
+
 class GESTUREBONE_PT_Infos(bpy.types.Panel):
     bl_label       = "Infos"
     bl_idname      = "GESTUREBONE_PT_infos"
@@ -70,7 +81,17 @@ class GESTUREBONE_PT_MainPanel(bpy.types.Panel):
     def draw(self, context):
         layout    = self.layout
         scene_gp  = context.scene.gesturebone_props
-        arm       = scene_gp.current_armature
+
+        active = context.active_object
+        if active and active.type == 'ARMATURE' and active.gesturebone_props.rig_type == 'GESTURE':
+            # GESTURE rig is directly selected
+            arm = active
+        elif active and active.type == 'CURVE':
+            # Active object is a curve — check if it's a GestureSpline belonging to a GESTURE rig.
+            # This keeps the GESTURE panel visible during the entire Activate Draw session.
+            arm = _gesture_arm_for_spline(active) or scene_gp.current_armature
+        else:
+            arm = scene_gp.current_armature
 
         if arm is None:
             row = layout.row()

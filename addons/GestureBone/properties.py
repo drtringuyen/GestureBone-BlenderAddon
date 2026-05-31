@@ -8,6 +8,11 @@ class GESTUREBONEProperties(bpy.types.PropertyGroup):
         description="Show extra-info-label and debug information",
         default=False
     )
+    extra_infos_mode: BoolProperty(
+        name="Extra Infos",
+        description="Show extra fields (Bind to Mesh, Tagging panel)",
+        default=False
+    )
     last_build_time: StringProperty(default="Never")
     addon_version: StringProperty(default="0.0.1")
 

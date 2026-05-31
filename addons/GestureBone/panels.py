@@ -41,6 +41,9 @@ class GESTUREBONE_PT_Infos(bpy.types.Panel):
         sub.operator("gesturebone.toggle_debug", text="", icon='INFO')
         row.operator("gesturebone.toggle_console", text="", icon='CONSOLE')
         row.operator("gesturebone.clear_console", text="", icon='TRASH')
+        extra_sub = row.row(align=True)
+        extra_sub.active_default = props.extra_infos_mode
+        extra_sub.prop(props, "extra_infos_mode", text="", icon='BOOKMARKS', toggle=True)
 
         if props.debug_mode:
             from . import module_manager

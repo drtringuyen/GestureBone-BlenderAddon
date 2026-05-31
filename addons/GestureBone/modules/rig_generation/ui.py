@@ -1,5 +1,5 @@
 import bpy
-from .utils import _p
+from .utils import _p, _bones_in_bone_coll
 from .scene_props import _get_bone_settings
 
 
@@ -36,8 +36,9 @@ class GESTUREBONE_PT_RigGeneration(bpy.types.Panel):
         props  = _p(context)
 
         # ── Registration ──────────────────────────────────────────────────────
-        global_props = getattr(context.scene, 'gesturebone_props', None)
-        debug_mode   = getattr(global_props, 'debug_mode', False) if global_props else False
+        global_props    = getattr(context.scene, 'gesturebone_props', None)
+        debug_mode      = getattr(global_props, 'debug_mode',      False) if global_props else False
+        extra_infos     = getattr(global_props, 'extra_infos_mode', False) if global_props else False
 
         box = layout.box()
         box.label(text="Registration", icon='PROPERTIES')
@@ -53,48 +54,98 @@ class GESTUREBONE_PT_RigGeneration(bpy.types.Panel):
         tmpl_row.operator("gesturebone.create_rig", text="Create Rig")
         col.separator()
 
-        split = col.split(factor=0.5)
-        split.label(text="Default Template")
-        split.prop(props, "atomic_chain", text="")
-        split = col.split(factor=0.5)
-        split.label(text="Meta Rig")
-        split.prop(props, "meta_rig", text="")
-        split = col.split(factor=0.5)
+        # Meta Rig — red when not set or not a valid armature
+        meta_valid = bool(props.meta_rig and bpy.data.objects.get(props.meta_rig))
+        mr_split   = col.split(factor=0.35)
+        mr_label   = mr_split.row()
+        mr_label.alert = not meta_valid
+        mr_label.label(text="Meta Rig")
+        mr_field = mr_split.row()
+        mr_field.alert = not meta_valid
+        mr_field.prop(props, "meta_rig", text="")
+
+        split = col.split(factor=0.35)
         split.label(text="Meta Collection")
         split.prop(props, "meta_collection", text="")
 
         col.separator()
 
-        # MetaBone + Control Mode quick-access row (above Auto Rig)
-        bone_name     = props.active_meta_bone
-        bone_selected = bool(bone_name and bone_name != 'NONE')
-        entry         = props.bone_settings.get(bone_name) if bone_selected else None
-        mode_ready    = entry is not None
+        # Per-MetaBone rows — greyed out when Meta Rig is not valid
+        arm_obj = bpy.data.objects.get(props.meta_rig) if meta_valid else None
+        all_bone_names = (
+            _bones_in_bone_coll(arm_obj.data, props.meta_collection)
+            if arm_obj and arm_obj.type == 'ARMATURE'
+            else []
+        )
 
-        # Single row: MetaBone | Template | Control Mode | Pivot
-        row = col.row(align=True)
-        row.prop(props, "active_meta_bone", text="")
-        if mode_ready:
-            row.prop(entry, "atomic_chain",    text="")
-            row.prop(entry, "control_mode",    text="")
-            row.prop(entry, "pivot_placement", text="", icon_only=True)
-        elif bone_selected:
-            sub       = row.row(align=True)
-            sub.alert = True
-            sub.operator("gesturebone.init_bone_control_mode", text="", icon='SETTINGS')
+        bones_col         = col.column(align=True)
+        bones_col.enabled = meta_valid
 
-        # Bind to Mesh row (only when this bone has settings)
-        if mode_ready:
-            bind_row = col.row(align=True)
-            bind_row.prop(entry, "bind_mesh", text="")
-            op = bind_row.operator("gesturebone.bind_to_mesh", text="", icon='MESH_DATA')
-            op.bone_name = bone_name
+        bone_selected = False
+        mode_ready    = False
+        for bone_name in all_bone_names:
+            entry         = props.bone_settings.get(bone_name)
+            bone_selected = True
+            mode_ready    = entry is not None
+
+            bind_missing  = mode_ready and not entry.bind_mesh
+            tmpl_missing  = mode_ready and not entry.atomic_chain
+            has_error     = bind_missing or tmpl_missing
+
+            bone_box = bones_col.box()
+
+            # Collapsible header
+            header = bone_box.row(align=True)
+            header.alert  = has_error
+            header.scale_y = 0.7
+            if mode_ready:
+                header.prop(
+                    entry, "ui_expanded",
+                    icon='TRIA_DOWN' if entry.ui_expanded else 'TRIA_RIGHT',
+                    text=bone_name, emboss=False,
+                )
+            else:
+                header.label(text=bone_name, icon='TRIA_RIGHT')
+                sub       = header.row(align=True)
+                sub.alert = True
+                op = sub.operator("gesturebone.init_bone_control_mode", text="", icon='SETTINGS')
+                op.bone_name = bone_name
+
+            if not mode_ready or entry.ui_expanded:
+                inner = bone_box.column(align=True)
+
+                if mode_ready:
+                    # Two rows share a split so both start after the "Template:" label
+                    split_inner = inner.split(factor=0.22, align=True)
+                    label_col   = split_inner.column(align=True)
+                    label_col.label(text="Template:")
+                    label_col.label(text="Bind mesh")
+
+                    field_col = split_inner.column(align=True)
+
+                    # Row 1: template field | control mode | pivot
+                    row1 = field_col.row(align=True)
+                    tmpl_sub = row1.row(align=True)
+                    tmpl_sub.alert = tmpl_missing
+                    tmpl_sub.prop(entry, "atomic_chain", text="")
+                    row1.prop(entry, "control_mode",    text="")
+                    row1.prop(entry, "pivot_placement", text="", icon_only=True)
+
+                    # Row 2: bind mesh picker + button (button hidden unless extra_infos)
+                    row2 = field_col.row(align=True)
+                    row2.alert = bind_missing
+                    row2.prop(entry, "bind_mesh", text="")
+                    row2.alert = False
+                    if extra_infos:
+                        op = row2.operator("gesturebone.bind_to_mesh", text="Bind to Mesh", icon='MESH_DATA')
+                        op.bone_name = bone_name
 
         col.separator()
 
-        # Grey out everything below while a bone is selected without a Control Mode
+        # Grey out Auto Rig row when Meta Rig invalid or any bone lacks settings
+        all_ready = all(props.bone_settings.get(n) is not None for n in all_bone_names)
         ops_col         = col.column(align=True)
-        ops_col.enabled = not bone_selected or mode_ready
+        ops_col.enabled = meta_valid and (not all_bone_names or all_ready)
 
         # Determine current state of CONNECT bones for icon toggle
         gesture_arm_obj = bpy.data.objects.get(f"{props.meta_rig}.Gesture")
@@ -115,17 +166,27 @@ class GESTUREBONE_PT_RigGeneration(bpy.types.Panel):
         meta_solo = props.meta_solo_mode
         meta_icon = 'BONE_DATA' if meta_solo else 'GROUP_BONE'
 
-        # Row 1: Auto Rig (wide) + 3 management icon buttons at end
+        # Armature switch / visibility toggle states
+        gesture_active      = props.gesture_active
+        show_both           = props.show_both_armatures
+        switch_icon         = 'CON_SPLINEIK' if gesture_active else 'ARMATURE_DATA'
+        visibility_icon     = 'HIDE_OFF' if show_both else 'HIDE_ON'
+
+        # Row 1: [visibility] [Auto Rig] [switch] [clear] [delete] [META]
         auto_row = ops_col.row(align=True)
+        auto_row.operator("gesturebone.toggle_armature_visibility",
+                          text="", icon=visibility_icon, depress=show_both)
         main_btn = auto_row.row(align=True)
-        main_btn.scale_x = 6.0
+        main_btn.scale_x = 4.0
         main_btn.operator("gesturebone.auto_rig", icon='PLAY')
+        auto_row.operator("gesturebone.switch_armature",
+                          text="", icon=switch_icon, depress=gesture_active)
         auto_row.operator("gesturebone.clear_rig", text="", icon='GHOST_DISABLED')
         auto_row.operator("gesturebone.delete_sample_folder", text="", icon='ORPHAN_DATA')
         auto_row.operator("gesturebone.toggle_meta_collection",
                           text="", icon=meta_icon, depress=meta_solo)
 
-        # Row 2: 3 labelled adjustment buttons filling the row
+        # Row 2: [Toggle CO] [Reset Str] [Toggle PI]
         util_row = ops_col.row(align=True)
         util_row.operator("gesturebone.toggle_connect_selectable",
                           icon=connect_icon, depress=connect_selectable)

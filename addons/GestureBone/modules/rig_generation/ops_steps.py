@@ -504,7 +504,7 @@ class GESTUREBONE_OT_FinishMerging(bpy.types.Operator):
         if wip and target_colls:
             gesture_splines_coll  = _ensure_child_coll(f"{meta_name}.GestureSplines",  target_colls[0])
             plotting_splines_coll = _ensure_child_coll(f"{meta_name}.PlottingSplines", target_colls[0])
-            sample_coll           = _ensure_child_coll("SampleMesh", target_colls[0])
+            sample_coll           = _ensure_child_coll(f"{meta_name}.Mesh", target_colls[0])
             for obj in _all_objects(wip):
                 if obj.type == 'CURVE':
                     if obj.name.endswith('.PlottingSpline'):
@@ -539,7 +539,7 @@ class GESTUREBONE_OT_FinishMerging(bpy.types.Operator):
         self.report({'INFO'},
             f"Joined {len(rig_sources)} -> '{rig_target.name}', "
             f"{len(gest_sources)} -> '{gest_target.name}'. "
-            f"Curves -> Splines, Meshes -> SampleMesh.{stale_msg}")
+            f"Curves -> Splines, Meshes -> {meta_name}.Mesh.{stale_msg}")
         props.last_step      = self.bl_idname
         props.completed_step = 9
         return {'FINISHED'}

@@ -144,13 +144,10 @@ class GESTUREBONE_OT_LoadChainsFromMetaRig(bpy.types.Operator):
         gesture_arm      = bpy.data.objects.get(gesture_arm_name)
 
         if gesture_arm and gesture_arm.type == 'ARMATURE':
-            # Wipe stale is_drawing flags on ALL armatures before switching — prevents
-            # the depsgraph handler from firing spurious popup loops after the switch.
+            # Wipe stale is_drawing flags on ALL armatures to prevent spurious popup loops.
             from . import operators_bake as _ob
             _ob.clear_all_drawing_state()
 
-            # Redirect the scene pointer so all subsequent operators use the right armature
-            context.scene.gesturebone_props.current_armature = gesture_arm
             mod_props = gesture_arm.gesturebone_gesture_draw_props
         else:
             # Gesture armature not generated yet — fall back to whatever is active

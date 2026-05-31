@@ -14,25 +14,26 @@ import bpy
 
 @bpy.app.handlers.persistent
 def _track_active_armature(scene, depsgraph):
-    """Set current_armature only when it is None (null situation).
-    Never overrides an already-set armature so bindings are never lost
-    when the active object switches to GP during drawing."""
+    """Keep current_armature in sync with the active armature.
+    Only updates when the active object IS an armature — switching to GP or
+    any non-armature leaves the pointer unchanged so operators keep working
+    during drawing."""
     ctx = bpy.context
     obj = getattr(ctx, 'active_object', None)
     if obj and obj.type == 'ARMATURE':
         try:
             props = scene.gesturebone_props
-            if props.current_armature is None:
-                props.current_armature = obj
+            props.current_armature = obj
         except Exception:
             pass
 
 
 def register():
-    from . import properties, infos, panels
+    from . import properties, infos, panels, extra_infos
     properties.register()
     infos.register()
     panels.register()
+    extra_infos.register()
 
     from . import module_manager
     module_manager.load_all()
@@ -48,7 +49,8 @@ def unregister():
     from . import module_manager
     module_manager.unload_all()
 
-    from . import properties, infos, panels
+    from . import properties, infos, panels, extra_infos
+    extra_infos.unregister()
     panels.unregister()
     infos.unregister()
     properties.unregister()

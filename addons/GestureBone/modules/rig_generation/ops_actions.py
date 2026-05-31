@@ -6,7 +6,7 @@ import bmesh
 import os
 from bpy.props import StringProperty
 from .utils import _p, _meta_rig, _bones_in_bone_coll, _ensure_object_mode, _delete_coll, _all_bone_colls
-from .scene_props import CONTROL_MODE_GN_INT, _get_bone_settings, _collection_search
+from .scene_props import CONTROL_MODE_GN_INT, _get_bone_settings
 
 
 _ADDON_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -135,13 +135,18 @@ class GESTUREBONE_OT_InitBoneControlMode(bpy.types.Operator):
     bl_description = "Initialize Control Mode settings for the active MetaBone (default: 5 Points)"
     bl_options     = {'REGISTER', 'UNDO'}
 
+    bone_name: bpy.props.StringProperty(options={'HIDDEN'})
+
     def execute(self, context):
         props     = _p(context)
-        bone_name = props.active_meta_bone
+        bone_name = self.bone_name or props.active_meta_bone
         if not bone_name or bone_name == 'NONE':
             self.report({'ERROR'}, "Select a MetaBone first")
             return {'CANCELLED'}
-        _get_bone_settings(props, bone_name)   # creates entry with default PT_5
+        entry = _get_bone_settings(props, bone_name)   # creates entry with default PT_5
+        # Auto-fill template from global fallback if entry is fresh (no template set yet)
+        if not entry.atomic_chain and props.atomic_chain:
+            entry.atomic_chain = props.atomic_chain
         return {'FINISHED'}
 
 
@@ -219,22 +224,39 @@ class GESTUREBONE_OT_AutoRig(bpy.types.Operator):
             if 'CANCELLED' in result:
                 self.report({'WARNING'}, f"Rig Part cancelled on '{bone_name}' — stopping ({done}/{total} done)")
                 return {'CANCELLED'}
+            # Apply bind mesh for this bone (no-op if bind_mesh is not set)
+            bpy.ops.gesturebone.bind_to_mesh(bone_name=bone_name)
             done += 1
 
         self.report({'INFO'}, f"Auto Rig complete — {done}/{total} bones processed")
 
-        # Switch to the Gesture armature in Pose Mode so it's ready to use
-        gesture_arm_name = f"{props.meta_rig}.Gesture"
-        gesture_arm = bpy.data.objects.get(gesture_arm_name)
-        if gesture_arm and gesture_arm.type == 'ARMATURE':
-            _ensure_object_mode(context)
-            bpy.ops.object.select_all(action='DESELECT')
-            gesture_arm.hide_set(False)
-            gesture_arm.hide_viewport = False
-            gesture_arm.select_set(True)
-            context.view_layer.objects.active = gesture_arm
-            bpy.ops.object.mode_set(mode='POSE')
+        # Post-rig cleanup: reset stretch, turn all toggles off
+        bpy.ops.gesturebone.reset_all_bones_stretch()
 
+        gesture_arm_name = f"{props.meta_rig}.Gesture"
+        gesture_arm      = bpy.data.objects.get(gesture_arm_name)
+        if gesture_arm and gesture_arm.type == 'ARMATURE':
+            # CONNECT bones → non-selectable (toggle OFF state)
+            for b in gesture_arm.data.bones:
+                if b.name.startswith('CONNECT'):
+                    b.hide_select = True
+            # PIVOT-ROTATION → hidden
+            pivot_bc = gesture_arm.data.collections.get('PIVOT-ROTATION')
+            if pivot_bc:
+                pivot_bc.is_visible = False
+
+        # META solo → off
+        props.meta_solo_mode = False
+        # Armature state: both visible, Gesture active
+        props.gesture_active       = True
+        props.show_both_armatures  = True
+
+        # Tag the MetaRig as GestureRigged so it appears in Meta Rig dropdowns
+        meta_arm = _meta_rig(props)
+        if meta_arm:
+            meta_arm["gesturebone_gesture_rigged"] = True
+
+        _activate_in_pose_mode(context, gesture_arm)
         return {'FINISHED'}
 
 
@@ -281,19 +303,22 @@ class GESTUREBONE_OT_ClearRig(bpy.types.Operator):
             _delete_coll(plot_coll)
             removed.append(plot_name)
 
-        # 3. Delete SampleMesh collection
-        sample = bpy.data.collections.get("SampleMesh")
+        # 5. Delete <MetaRig>.Mesh collection
+        sample_name = f"{meta_rig_name}.Mesh"
+        sample = bpy.data.collections.get(sample_name)
+        if sample is None:
+            sample = bpy.data.collections.get("SampleMesh")  # legacy fallback
         if sample:
+            removed.append(sample.name)
             _delete_coll(sample)
-            removed.append("SampleMesh")
 
-        # 4. Delete <MetaRig>.Gesture armature object
+        # 6. Delete <MetaRig>.Gesture armature object
         gesture_arm = bpy.data.objects.get(f"{meta_rig_name}.Gesture")
         if gesture_arm:
             bpy.data.objects.remove(gesture_arm, do_unlink=True)
             removed.append(f"{meta_rig_name}.Gesture")
 
-        # 5. Delete non-META bone collections AND their generated bones from MetaRig
+        # 7. Delete non-META bone collections AND their generated bones from MetaRig
         arm_obj = _meta_rig(props)
         if arm_obj and arm_obj.type == 'ARMATURE':
             meta_coll_name = props.meta_collection
@@ -349,17 +374,21 @@ class GESTUREBONE_OT_ClearRig(bpy.types.Operator):
 class GESTUREBONE_OT_DeleteSampleFolder(bpy.types.Operator):
     bl_idname      = "gesturebone.delete_sample_folder"
     bl_label       = "Delete Sample Folder"
-    bl_description = "Delete the 'SampleMesh' collection and all objects inside it"
+    bl_description = "Delete the '<MetaRig>.Mesh' collection and all objects inside it"
     bl_options     = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
-        sample_coll = bpy.data.collections.get("SampleMesh")
+        props       = _p(context)
+        coll_name   = f"{props.meta_rig}.Mesh"
+        sample_coll = bpy.data.collections.get(coll_name)
+        if sample_coll is None:
+            sample_coll = bpy.data.collections.get("SampleMesh")  # legacy fallback
         if not sample_coll:
-            self.report({'WARNING'}, "'SampleMesh' collection not found")
+            self.report({'WARNING'}, f"'{coll_name}' collection not found")
             return {'CANCELLED'}
         obj_count = len(list(sample_coll.objects))
         _delete_coll(sample_coll)
-        self.report({'INFO'}, f"Deleted 'SampleMesh' ({obj_count} object(s) removed)")
+        self.report({'INFO'}, f"Deleted '{coll_name}' ({obj_count} object(s) removed)")
         return {'FINISHED'}
 
 
@@ -562,11 +591,20 @@ class GESTUREBONE_OT_BindToMesh(bpy.types.Operator):
             self.report({'ERROR'}, "Sample Mesh not set — run Steps 1–9 first")
             return {'CANCELLED'}
 
-        # 1. Ensure 'Mesh' collection; link source mesh there (never move/duplicate it)
-        mesh_coll = bpy.data.collections.get("Mesh")
+        # 1. Ensure 'Original Mesh' collection; move source mesh exclusively there.
+        mesh_coll = bpy.data.collections.get("Original Mesh")
         if mesh_coll is None:
-            mesh_coll = bpy.data.collections.new("Mesh")
-            context.scene.collection.children.link(mesh_coll)
+            # Migrate legacy "Mesh" collection if it exists, otherwise create fresh
+            mesh_coll = bpy.data.collections.get("Mesh")
+            if mesh_coll:
+                mesh_coll.name = "Original Mesh"
+            else:
+                mesh_coll = bpy.data.collections.new("Original Mesh")
+                context.scene.collection.children.link(mesh_coll)
+        # Unlink bind_mesh from every other collection so it lives only in "Original Mesh"
+        for coll in list(bind_mesh.users_collection):
+            if coll != mesh_coll:
+                coll.objects.unlink(bind_mesh)
         if bind_mesh.name not in mesh_coll.objects:
             mesh_coll.objects.link(bind_mesh)
 
@@ -599,67 +637,101 @@ class GESTUREBONE_OT_BindToMesh(bpy.types.Operator):
 class GESTUREBONE_OT_CreateRig(bpy.types.Operator):
     bl_idname      = "gesturebone.create_rig"
     bl_label       = "Create Rig"
-    bl_description = "Duplicate the MetaRig Template into a new named armature"
+    bl_description = "Duplicate the Sample Rig template into a new named armature"
     bl_options     = {'REGISTER', 'UNDO'}
 
-    new_rig_name:       StringProperty(name="New Rig Name", default="MyRig")
-    new_rig_collection: StringProperty(name="Collection",   search=_collection_search)
+    new_rig_name: StringProperty(name="New Rig Name", default="MyRig")
 
     def invoke(self, context, event):
-        props = _p(context)
-        if not props.meta_rig_template:
-            self.report({'ERROR'}, "Set a MetaRig Template first")
+        # Find a sample rig to duplicate
+        sample = next((o for o in bpy.data.objects
+                       if o.type == 'ARMATURE' and 'gesturebone_sample_rig' in o), None)
+        if sample is None:
+            self.report({'ERROR'}, "No armature tagged as Sample Rig found")
             return {'CANCELLED'}
         return context.window_manager.invoke_props_dialog(self)
 
     def draw(self, context):
-        col = self.layout.column()
-        col.prop(self, "new_rig_name")
-        col.prop(self, "new_rig_collection")
-        coll_name = self.new_rig_collection.strip()
-        if coll_name:
-            exists = bpy.data.collections.get(coll_name) is not None
-            info_row = col.row()
-            info_row.label(
-                text="Collection exists" if exists else "New collection will be created",
-                icon='CHECKMARK' if exists else 'ADD',
-            )
+        self.layout.prop(self, "new_rig_name")
 
     def execute(self, context):
-        props    = _p(context)
-        template = bpy.data.objects.get(props.meta_rig_template)
-        if not template or template.type != 'ARMATURE':
-            self.report({'ERROR'}, f"Template '{props.meta_rig_template}' not found or not an armature")
-            return {'CANCELLED'}
-
         name = self.new_rig_name.strip()
         if not name:
             self.report({'ERROR'}, "New rig name cannot be empty")
             return {'CANCELLED'}
 
+        sample = next((o for o in bpy.data.objects
+                       if o.type == 'ARMATURE' and 'gesturebone_sample_rig' in o), None)
+        if sample is None:
+            self.report({'ERROR'}, "No armature tagged as Sample Rig found")
+            return {'CANCELLED'}
+
+        # 1. Duplicate sample rig via data API (works even if not in view layer)
         _ensure_object_mode(context)
-        bpy.ops.object.select_all(action='DESELECT')
-        template.hide_set(False)
-        template.select_set(True)
-        context.view_layer.objects.active = template
-        bpy.ops.object.duplicate()
 
-        new_obj      = context.active_object
-        new_obj.name = name
-        new_obj.data = new_obj.data.copy()
-        new_obj.data.name = name
+        # Purge any orphaned object with the same name so Blender doesn't append .001
+        existing = bpy.data.objects.get(name)
+        if existing and existing not in context.scene.objects.values():
+            bpy.data.objects.remove(existing, do_unlink=True)
 
-        coll_name = self.new_rig_collection.strip()
-        if coll_name:
-            target_coll = bpy.data.collections.get(coll_name)
-            if target_coll is None:
-                target_coll = bpy.data.collections.new(coll_name)
-                context.scene.collection.children.link(target_coll)
-            for c in list(new_obj.users_collection):
-                c.objects.unlink(new_obj)
-            target_coll.objects.link(new_obj)
+        new_data      = sample.data.copy()
+        new_data.name = name
+        new_obj       = bpy.data.objects.new(name, new_data)
+        # Link to scene so it exists in the view layer
+        context.scene.collection.objects.link(new_obj)
+        # Force depsgraph update so pose is initialized before we read it
+        context.view_layer.update()
+        # Copy object-level custom properties from sample (tag stripping happens below)
+        for key, val in sample.items():
+            new_obj[key] = val
+        # Copy pose bone settings (custom shapes, colors, etc.) from sample
+        for src_pb in (sample.pose.bones if sample.pose else []):
+            dst_pb = new_obj.pose.bones.get(src_pb.name)
+            if dst_pb is None:
+                continue
+            dst_pb.custom_shape               = src_pb.custom_shape
+            dst_pb.custom_shape_scale_xyz     = src_pb.custom_shape_scale_xyz[:]
+            dst_pb.custom_shape_translation   = src_pb.custom_shape_translation[:]
+            dst_pb.custom_shape_rotation_euler = src_pb.custom_shape_rotation_euler[:]
+            dst_pb.use_custom_shape_bone_size = src_pb.use_custom_shape_bone_size
+            dst_pb.color.palette              = src_pb.color.palette
 
-        self.report({'INFO'}, f"Created rig '{name}'")
+        # 2. Tags: GestureRigged=True, SampleRig removed
+        new_obj["gesturebone_gesture_rigged"] = True
+        if "gesturebone_sample_rig" in new_obj:
+            del new_obj["gesturebone_sample_rig"]
+
+        # 3. Create (or get) collection <name> and move rig into it
+        rig_coll = bpy.data.collections.get(name)
+        if rig_coll is None:
+            rig_coll = bpy.data.collections.new(name)
+            context.scene.collection.children.link(rig_coll)
+        for c in list(new_obj.users_collection):
+            c.objects.unlink(new_obj)
+        rig_coll.objects.link(new_obj)
+
+        # 4. Create (or get) <name>.Mesh as child of <name> collection
+        mesh_coll_name = f"{name}.Mesh"
+        mesh_coll = bpy.data.collections.get(mesh_coll_name)
+        if mesh_coll is None:
+            mesh_coll = bpy.data.collections.new(mesh_coll_name)
+            rig_coll.children.link(mesh_coll)
+
+        # 5. Set as active Meta Rig
+        props          = _p(context)
+        props.meta_rig = name
+
+        # 6. Enter Pose Mode and solo the META bone collection
+        _activate_in_pose_mode(context, new_obj)
+        meta_coll = props.meta_collection
+        if meta_coll:
+            bc = new_obj.data.collections.get(meta_coll)
+            if bc:
+                for c in new_obj.data.collections:
+                    c.is_visible = (c.name == meta_coll)
+                props.meta_solo_mode = True
+
+        self.report({'INFO'}, f"Created rig '{name}' in collection '{name}'")
         return {'FINISHED'}
 
 
@@ -697,6 +769,70 @@ class GESTUREBONE_OT_LoadTemplateRig(bpy.types.Operator):
         return {'FINISHED'}
 
 
+# ─── SWITCH ARMATURE ─────────────────────────────────────────────────────────
+
+class GESTUREBONE_OT_SwitchArmature(bpy.types.Operator):
+    bl_idname      = "gesturebone.switch_armature"
+    bl_label       = "Switch Armature"
+    bl_description = "Switch active armature between MetaRig and Gesture rig"
+    bl_options     = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        props        = _p(context)
+        meta_obj     = _meta_rig(props)
+        gesture_obj  = bpy.data.objects.get(f"{props.meta_rig}.Gesture")
+
+        if not meta_obj or not gesture_obj:
+            self.report({'ERROR'}, "Both MetaRig and Gesture armature must exist")
+            return {'CANCELLED'}
+
+        # Toggle: if Gesture is currently active, switch to MetaRig and vice versa
+        props.gesture_active = not props.gesture_active
+        target = gesture_obj if props.gesture_active else meta_obj
+
+        # Respect show_both_armatures — if in solo mode, hide the other
+        other = meta_obj if props.gesture_active else gesture_obj
+        if not props.show_both_armatures:
+            other.hide_set(True)
+            target.hide_set(False)
+
+        _activate_in_pose_mode(context, target)
+        return {'FINISHED'}
+
+
+# ─── TOGGLE ARMATURE VISIBILITY ───────────────────────────────────────────────
+
+class GESTUREBONE_OT_ToggleArmatureVisibility(bpy.types.Operator):
+    bl_idname      = "gesturebone.toggle_armature_visibility"
+    bl_label       = "Toggle Armature Visibility"
+    bl_description = "Show both armatures, or solo the active one (hide the other)"
+    bl_options     = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        props       = _p(context)
+        meta_obj    = _meta_rig(props)
+        gesture_obj = bpy.data.objects.get(f"{props.meta_rig}.Gesture")
+
+        if not meta_obj or not gesture_obj:
+            self.report({'ERROR'}, "Both MetaRig and Gesture armature must exist")
+            return {'CANCELLED'}
+
+        props.show_both_armatures = not props.show_both_armatures
+        if props.show_both_armatures:
+            meta_obj.hide_set(False)
+            gesture_obj.hide_set(False)
+        else:
+            active  = gesture_obj if props.gesture_active else meta_obj
+            hidden  = meta_obj    if props.gesture_active else gesture_obj
+            hidden.hide_set(True)
+            active.hide_set(False)
+            _activate_in_pose_mode(context, active)
+
+        state = "both visible" if props.show_both_armatures else "solo active"
+        self.report({'INFO'}, f"Armature visibility: {state}")
+        return {'FINISHED'}
+
+
 # ─── REGISTER ─────────────────────────────────────────────────────────────────
 
 _classes = [
@@ -712,6 +848,8 @@ _classes = [
     GESTUREBONE_OT_BindToMesh,
     GESTUREBONE_OT_CreateRig,
     GESTUREBONE_OT_LoadTemplateRig,
+    GESTUREBONE_OT_SwitchArmature,
+    GESTUREBONE_OT_ToggleArmatureVisibility,
 ]
 
 

@@ -33,28 +33,52 @@ def _get_bone_settings(props, bone_name):
 
 # ── Dynamic enum / search callbacks ──────────────────────────────────────────
 
+_TAG_TEMPLATE        = "gesturebone_template"
+_TAG_GESTURE_RIGGED  = "gesturebone_gesture_rigged"
+
+
+def _scene_collections(context):
+    """Recursively gather all collections linked into the current scene."""
+    result = []
+    def _walk(coll):
+        result.append(coll)
+        for child in coll.children:
+            _walk(child)
+    if context:
+        _walk(context.scene.collection)
+    else:
+        result.extend(bpy.data.collections)
+    return result
+
+
 def _collection_search(self, context, edit_text):
-    names = [c.name for c in bpy.data.collections]
+    colls  = _scene_collections(context)
+    tagged = [c.name for c in colls if _TAG_TEMPLATE in c]
+    pool   = tagged if tagged else [c.name for c in colls]
     if not edit_text:
-        return names
+        return pool
     lo = edit_text.lower()
-    return [n for n in names if lo in n.lower()]
-
-
-def _bone_template_search(self, context, edit_text):
-    names = [c.name for c in bpy.data.collections]
-    if not edit_text:
-        return names
-    lo = edit_text.lower()
-    return [n for n in names if lo in n.lower()]
+    return [n for n in pool if lo in n.lower()]
 
 
 def _armature_name_search(self, context, edit_text):
-    all_arms = [o.name for o in bpy.data.objects if o.type == 'ARMATURE']
-    if not edit_text or edit_text == self.meta_rig:
-        return all_arms
+    # Only armatures in the current scene tagged as GestureRigged — no fallback
+    scene_objs = context.scene.objects if context else []
+    pool = [o.name for o in scene_objs if o.type == 'ARMATURE' and _TAG_GESTURE_RIGGED in o]
+    if not edit_text:
+        return pool
     lo = edit_text.lower()
-    return [n for n in all_arms if lo in n.lower()]
+    return [n for n in pool if lo in n.lower()]
+
+
+def _on_meta_rig_update(self, context):
+    """Clear meta_rig if the stored name is no longer a valid GestureRigged armature in the scene."""
+    if not self.meta_rig:
+        return
+    scene_objs = context.scene.objects if context else []
+    obj = next((o for o in scene_objs if o.name == self.meta_rig and o.type == 'ARMATURE'), None)
+    if obj is None or _TAG_GESTURE_RIGGED not in obj:
+        self.meta_rig = ""
 
 
 def _bone_coll_name_search(self, context, edit_text):
@@ -84,9 +108,12 @@ def _on_active_meta_bone_update(self, context):
     bone_name = self.active_meta_bone
     if not bone_name or bone_name == 'NONE':
         return
-    if self.bone_settings.get(bone_name) is None:
+    entry = self.bone_settings.get(bone_name)
+    if entry is None:
         entry = self.bone_settings.add()
         entry.name = bone_name
+    if not entry.atomic_chain and self.atomic_chain:
+        entry.atomic_chain = self.atomic_chain
 
 
 # ── Property groups ───────────────────────────────────────────────────────────
@@ -114,10 +141,11 @@ def _on_bone_settings_control_mode_update(self, context):
 class GESTUREBONE_PG_MetaBoneSettings(bpy.types.PropertyGroup):
     """Per-MetaBone settings stored by bone name (accessed via bone_settings.get(bone_name))."""
     # 'name' StringProperty is inherited from PropertyGroup — used as the bone_name key
+    ui_expanded: BoolProperty(name="Expanded", default=True)
     atomic_chain: StringProperty(
         name="Template",
         description="Template collection for this bone. Leave empty to fall back to the global Registration template",
-        search=_bone_template_search,
+        search=_collection_search,
     )
     control_mode: EnumProperty(
         name="Control Mode",
@@ -153,8 +181,9 @@ class GESTUREBONE_PG_MetaBoneSettings(bpy.types.PropertyGroup):
 
 class GESTUREBONE_PG_RigGenerationProps(bpy.types.PropertyGroup):
     atomic_chain:       StringProperty(name="Template",           search=_collection_search)
-    meta_rig:           StringProperty(name="Meta Rig",           default="MetaRig",
-                                       search=_armature_name_search)
+    meta_rig:           StringProperty(name="Meta Rig",           default="",
+                                       search=_armature_name_search,
+                                       update=_on_meta_rig_update)
     meta_collection:    StringProperty(name="Meta Collection",    default="MetaCollection",
                                        search=_bone_coll_name_search)
     meta_rig_template:  StringProperty(name="MetaRig Template",
@@ -175,6 +204,10 @@ class GESTUREBONE_PG_RigGenerationProps(bpy.types.PropertyGroup):
     bone_settings: CollectionProperty(type=GESTUREBONE_PG_MetaBoneSettings)
     # META toggle state: True = META is soloed (only META visible), False = all visible
     meta_solo_mode: BoolProperty(name="META Solo", default=False)
+    # Armature switch: True = Gesture is active, False = MetaRig is active
+    gesture_active: BoolProperty(name="Gesture Active", default=False)
+    # Armature visibility: True = both visible, False = solo the active one
+    show_both_armatures: BoolProperty(name="Show Both Armatures", default=True)
 
 
 def register():

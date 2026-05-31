@@ -1,20 +1,12 @@
 import bpy
 from .curve_bone_chain import _ctrl_bone_indices
-from .utils import _constraints_are_muted, _constraints_exist
+from .utils import _arm, _constraints_are_muted, _constraints_exist
 
 
 def _chain_is_ready(chain):
     has_bone = any(entry.bone for entry in chain.part_control_bones)
     has_gesture_spline = chain.part_gesture_spline is not None
     return chain.is_bound and has_bone and has_gesture_spline
-
-
-def _active_arm(context):
-    obj = context.active_object
-    if obj and obj.type == 'ARMATURE':
-        return obj
-    fallback = context.scene.gesturebone_props.current_armature
-    return fallback if fallback and fallback.type == 'ARMATURE' else None
 
 
 class GESTUREBONE_PT_GestureDraw(bpy.types.Panel):
@@ -39,16 +31,19 @@ class GESTUREBONE_PT_GestureDrawBinding(bpy.types.Panel):
     bl_category = "GestureBone"
     bl_parent_id = "GESTUREBONE_PT_gesture_draw"
     bl_options = {'DEFAULT_CLOSED'}
-    bl_order = 0
+    bl_order = 1
 
     def draw(self, context):
         layout = self.layout
-        arm = _active_arm(context)
+
+        rig_gen = getattr(context.scene, 'gesturebone_rig_generation_props', None)
+        meta_rig_name = rig_gen.meta_rig if rig_gen else ""
+        arm = bpy.data.objects.get(f"{meta_rig_name}.Gesture") if meta_rig_name else None
 
         if arm is None:
             row = layout.row()
             row.alert = True
-            row.label(text="Select an armature to bind chains", icon='ERROR')
+            row.label(text="Generate the rig first (Rig Generation panel)", icon='ERROR')
             return
 
         mod_props = getattr(arm, 'gesturebone_gesture_draw_props', None)
@@ -59,7 +54,8 @@ class GESTUREBONE_PT_GestureDrawBinding(bpy.types.Panel):
         debug_mode = getattr(getattr(context.scene, 'gesturebone_props', None), 'debug_mode', False)
 
         row = layout.row(align=True)
-        row.operator("gesturebone.load_chains_from_meta_rig", icon='FILE_ALIAS', text="Load Chain From Meta Rig")
+        row.operator("gesturebone.load_chains_from_meta_rig", icon='FILE_ALIAS',
+                     text=f"Load and Create Chain for {meta_rig_name}")
         row.operator("gesturebone.refresh_all_chains", icon='FILE_REFRESH', text="")
 
         for i, chain in enumerate(mod_props.chains):
@@ -147,11 +143,12 @@ class GESTUREBONE_PT_GestureDrawGestures(bpy.types.Panel):
     bl_category = "GestureBone"
     bl_parent_id = "GESTUREBONE_PT_gesture_draw"
     bl_options = {'DEFAULT_CLOSED'}
-    bl_order = 1
+    bl_order = 0
 
     def draw(self, context):
         layout = self.layout
-        arm = _active_arm(context)
+        arm = _arm(context)
+        GESTUREBONE_PT_GestureDrawGestures.bl_label = f"Gesture Draw ({arm.name})" if arm else "Gesture Draw"
 
         if arm is None:
             row = layout.row()
@@ -242,7 +239,7 @@ class GESTUREBONE_PT_GestureDrawDebug(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
-        arm = _active_arm(context)
+        arm = _arm(context)
 
         if arm is None:
             layout.label(text="No armature", icon='ERROR')

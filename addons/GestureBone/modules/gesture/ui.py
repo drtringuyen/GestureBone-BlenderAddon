@@ -55,9 +55,10 @@ def draw_gesture_ui(layout, context, arm):
         is_drawing = chain.is_drawing
 
         box = layout.box()
+        stack = box.column(align=True)  # single aligned column → tight vertical spacing
 
         # ── Header row: collapse | name | status | bind toggle ───────────────
-        header = box.row(align=True)
+        header = stack.row(align=True)
         header.prop(chain, "ui_expanded",
                     icon='TRIA_DOWN' if chain.ui_expanded else 'TRIA_RIGHT',
                     text="", emboss=False)
@@ -84,20 +85,19 @@ def draw_gesture_ui(layout, context, arm):
             continue
 
         # ── Body ─────────────────────────────────────────────────────────────
-        body = box.column(align=True)
+        body = stack.column(align=True)
 
-        # Spline picker
-        body.prop(chain, "gesture_spline", text="Spline", icon='CURVE_BEZCURVE')
-
-        # Control bones (collapsible)
+        # Bindings (collapsible): Spline picker + control bones
         ctrl_header = body.row(align=True)
         ctrl_header.prop(
             chain, "control_bones_expanded",
             icon='TRIA_DOWN' if chain.control_bones_expanded else 'TRIA_RIGHT',
-            text=f"Control Bones ({len(chain.control_bones)})", emboss=False,
+            text=f"Bindings ({len(chain.control_bones)})", emboss=False,
         )
         if chain.control_bones_expanded:
             ctrl_col = body.column(align=True)
+            # Spline picker
+            ctrl_col.prop(chain, "gesture_spline", text="Spline", icon='CURVE_BEZCURVE')
             if chain.control_bones:
                 for i, entry in enumerate(chain.control_bones):
                     ctrl_col.prop(entry, "bone", text=f"  Bone {i}")
@@ -113,7 +113,7 @@ def draw_gesture_ui(layout, context, arm):
             continue
 
         # ── Compact draw card (double-height row + slim slider row) ──────────
-        card = box.column(align=True)
+        card = stack.column(align=True)
 
         # Row 1 (double height): activate/toggle | switch dir | apply | delete
         row = card.row(align=True)

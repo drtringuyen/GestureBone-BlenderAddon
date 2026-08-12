@@ -35,11 +35,19 @@ def draw_plotting_ui(layout, context, arm):
     debug_mode = getattr(scene_gp, 'debug_mode', False)
     extra_info = getattr(scene_gp, 'extra_infos_mode', False)
 
+    # Icon reflecting which armature the switch button jumps to (mirrors the
+    # switch button in the Auto Rig bar below so both stay visually in sync).
+    switch_icon = 'CON_SPLINEIK' if props.gesture_active else 'ARMATURE_DATA'
+
     # ── Registration ──────────────────────────────────────────────────────────
     box = layout.box()
     reg_head = box.row(align=True)
     reg_head.label(text="Registration", icon='PROPERTIES')
     reg_head.operator("gesturebone.append_essentials", text="", icon='FILE_REFRESH')
+    # Switch back to the Gesture armature (kept here so it stays reachable from
+    # the top of the PLOTTING UI, mirroring the switch button on the GESTURE UI).
+    reg_head.operator("gesturebone.switch_armature", text="", icon=switch_icon,
+                      depress=props.gesture_active)
 
     col = box.column(align=True)
     col.operator("gesturebone.create_rig", text="Create Rig", icon='ADD')
@@ -144,7 +152,6 @@ def draw_plotting_ui(layout, context, arm):
 
     connect_icon = 'RESTRICT_SELECT_OFF' if connect_selectable else 'RESTRICT_SELECT_ON'
     meta_icon    = 'BONE_DATA' if props.meta_solo_mode else 'GROUP_BONE'
-    switch_icon  = 'CON_SPLINEIK' if props.gesture_active else 'ARMATURE_DATA'
     vis_icon     = 'HIDE_OFF' if props.show_both_armatures else 'HIDE_ON'
 
     ops_col = layout.column(align=True)

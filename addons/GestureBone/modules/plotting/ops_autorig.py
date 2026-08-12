@@ -527,13 +527,26 @@ class GESTUREBONE_OT_SwitchArmature(bpy.types.Operator):
         if not arm or not gesture_obj:
             self.report({'ERROR'}, "Both MetaRig and Gesture armature must exist")
             return {'CANCELLED'}
+
+        # Reconcile the stored toggle with the armature actually in front before
+        # flipping. gesture_active is not tracked by the depsgraph handler, so a
+        # blind toggle can flip the wrong way (and hide the wrong rig) if the user
+        # selected an armature manually since the last switch.
+        active = context.active_object
+        if active is gesture_obj:
+            props.gesture_active = True
+        elif active is arm:
+            props.gesture_active = False
+
         props.gesture_active = not props.gesture_active
         target = gesture_obj if props.gesture_active else arm
         other  = arm if props.gesture_active else gesture_obj
-        if not props.show_both_armatures:
-            other.hide_set(True)
-            target.hide_set(False)
-        _activate_in_pose_mode(context, target)
+
+        # Switching always solos the target so the other armature is hidden
+        # correctly; the eye toggle stays consistent with that solo state.
+        props.show_both_armatures = False
+        other.hide_set(True)
+        _activate_in_pose_mode(context, target)  # unhides + selects + pose mode
         return {'FINISHED'}
 
 

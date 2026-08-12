@@ -115,7 +115,9 @@ class GESTUREBONE_PT_MainPanel(bpy.types.Panel):
             'PRESET':   "PRESET",
             'NONE':     "Untagged",
         }.get(rig_type, "Untagged")
-        name_row.label(text=f"· {type_label}")
+        tag_sub = name_row.row()
+        tag_sub.alignment = 'RIGHT'
+        tag_sub.label(text=type_label)
 
         layout.separator(factor=0.3)
 

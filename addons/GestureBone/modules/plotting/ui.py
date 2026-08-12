@@ -1,6 +1,11 @@
 """
 plotting/ui.py — UI for PLOTTING rigs.
 draw_plotting_ui() is called inline from panels.py when rig_type == 'PLOTTING'.
+
+UI style ported back from the "fine tune UI" commit: a "Registration" box with
+Default Template / Meta Rig / Meta Collection split rows, and a wide Auto Rig
+button followed by a compact icon cluster. Behaviour and operators are unchanged
+from the rearchitected backend.
 """
 import bpy
 from ..shared.utils import _all_bone_colls
@@ -30,30 +35,35 @@ def draw_plotting_ui(layout, context, arm):
     debug_mode = getattr(scene_gp, 'debug_mode', False)
     extra_info = getattr(scene_gp, 'extra_infos_mode', False)
 
-    # ── SETUP section ─────────────────────────────────────────────────────────
-    setup_box = layout.box()
-    setup_row = setup_box.row()
-    setup_row.label(text="Setup", icon='PROPERTIES')
-    setup_row.operator("gesturebone.append_essentials", text="Load Essentials", icon='FILE_REFRESH')
+    # ── Registration ──────────────────────────────────────────────────────────
+    box = layout.box()
+    reg_head = box.row(align=True)
+    reg_head.label(text="Registration", icon='PROPERTIES')
+    reg_head.operator("gesturebone.append_essentials", text="", icon='FILE_REFRESH')
 
-    setup_col = setup_box.column(align=True)
-    setup_col.operator("gesturebone.create_rig", text="Create Rig", icon='ADD')
-    setup_col.separator()
+    col = box.column(align=True)
+    col.operator("gesturebone.create_rig", text="Create Rig", icon='ADD')
+    col.separator()
 
-    split = setup_col.split(factor=0.35)
+    split = col.split(factor=0.5)
+    split.label(text="Default Template")
+    split.prop(props, "atomic_chain", text="")
+
+    split = col.split(factor=0.5)
+    split.label(text="Meta Rig")
+    meta_sub = split.row()
+    meta_sub.enabled = False
+    meta_sub.label(text=arm.name, icon='ARMATURE_DATA')
+
+    split = col.split(factor=0.5)
     split.label(text="Meta Collection")
     split.prop(props, "meta_collection", text="")
 
-    split2 = setup_col.split(factor=0.35)
-    split2.label(text="Global Template")
-    split2.prop(props, "atomic_chain", text="")
-
-    # ── CHAINS section ────────────────────────────────────────────────────────
+    # ── Chains ────────────────────────────────────────────────────────────────
     layout.separator(factor=0.5)
     chain_header = layout.row(align=True)
     chain_header.label(text="Chains", icon='BONE_DATA')
     chain_header.operator("gesturebone.sync_chains_from_meta_bones", text="", icon='FILE_REFRESH')
-    chain_header.operator("gesturebone.auto_rig", text="Auto Rig", icon='PLAY')
 
     chains = props.chains
     if not chains:
@@ -74,6 +84,16 @@ def draw_plotting_ui(layout, context, arm):
             status_sub = header.row(align=True)
             status_sub.alert = status_alert
             status_sub.label(text=status_text, icon=status_icon)
+
+            # Move buttons (inline in header, old-style)
+            move_sub = header.row(align=True)
+            up_op = move_sub.operator("gesturebone.move_chain", text="", icon='TRIA_UP')
+            up_op.chain_index = i
+            up_op.direction   = 'UP'
+            dn_op = move_sub.operator("gesturebone.move_chain", text="", icon='TRIA_DOWN')
+            dn_op.chain_index = i
+            dn_op.direction   = 'DOWN'
+
             op = header.operator("gesturebone.rerig_part", text="", icon='FILE_REFRESH')
             op.bone_name = chain.part_name
 
@@ -107,18 +127,9 @@ def draw_plotting_ui(layout, context, arm):
                 icon='ARMATURE_DATA',
             )
 
-            # Move buttons
-            move_row = body.row(align=True)
-            up_op = move_row.operator("gesturebone.move_chain", text="", icon='TRIA_UP')
-            up_op.chain_index = i
-            up_op.direction   = 'UP'
-            dn_op = move_row.operator("gesturebone.move_chain", text="", icon='TRIA_DOWN')
-            dn_op.chain_index = i
-            dn_op.direction   = 'DOWN'
-
+    # ── Auto Rig + operations bar (old two-row style) ─────────────────────────
     layout.separator(factor=0.5)
 
-    # ── Operations bar ────────────────────────────────────────────────────────
     gesture_arm_obj = bpy.data.objects.get(f"{arm.name}.Gesture")
 
     connect_selectable = True
@@ -136,20 +147,29 @@ def draw_plotting_ui(layout, context, arm):
     switch_icon  = 'CON_SPLINEIK' if props.gesture_active else 'ARMATURE_DATA'
     vis_icon     = 'HIDE_OFF' if props.show_both_armatures else 'HIDE_ON'
 
-    ops_row = layout.row(align=True)
-    ops_row.operator("gesturebone.toggle_armature_visibility", text="", icon=vis_icon,
-                     depress=props.show_both_armatures)
-    ops_row.operator("gesturebone.switch_armature",           text="", icon=switch_icon,
-                     depress=props.gesture_active)
-    ops_row.operator("gesturebone.clear_rig",                 text="", icon='GHOST_DISABLED')
-    ops_row.operator("gesturebone.delete_sample_folder",      text="", icon='ORPHAN_DATA')
-    ops_row.operator("gesturebone.toggle_meta_collection",    text="", icon=meta_icon,
-                     depress=props.meta_solo_mode)
-    ops_row.operator("gesturebone.toggle_connect_selectable", text="", icon=connect_icon,
-                     depress=connect_selectable)
-    ops_row.operator("gesturebone.reset_all_bones_stretch",   text="", icon='SNAP_MIDPOINT')
-    ops_row.operator("gesturebone.toggle_pivot_rotation",     text="", icon='PIVOT_CURSOR',
-                     depress=pivot_active)
+    ops_col = layout.column(align=True)
+
+    # Row 1: Auto Rig (wide) + management icon cluster
+    auto_row = ops_col.row(align=True)
+    main_btn = auto_row.row(align=True)
+    main_btn.scale_x = 6.0
+    main_btn.operator("gesturebone.auto_rig", text="Auto Rig", icon='PLAY')
+    auto_row.operator("gesturebone.toggle_armature_visibility", text="", icon=vis_icon,
+                      depress=props.show_both_armatures)
+    auto_row.operator("gesturebone.switch_armature", text="", icon=switch_icon,
+                      depress=props.gesture_active)
+    auto_row.operator("gesturebone.clear_rig", text="", icon='GHOST_DISABLED')
+    auto_row.operator("gesturebone.delete_sample_folder", text="", icon='ORPHAN_DATA')
+    auto_row.operator("gesturebone.toggle_meta_collection", text="", icon=meta_icon,
+                      depress=props.meta_solo_mode)
+
+    # Row 2: labelled adjustment buttons filling the row
+    util_row = ops_col.row(align=True)
+    util_row.operator("gesturebone.toggle_connect_selectable", icon=connect_icon,
+                      depress=connect_selectable)
+    util_row.operator("gesturebone.reset_all_bones_stretch", icon='SNAP_MIDPOINT')
+    util_row.operator("gesturebone.toggle_pivot_rotation", icon='PIVOT_CURSOR',
+                      depress=pivot_active)
 
     # ── Debug: step-by-step ───────────────────────────────────────────────────
     if debug_mode:

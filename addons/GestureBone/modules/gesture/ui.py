@@ -59,14 +59,10 @@ def draw_gesture_ui(layout, context, arm):
 
         # ── Header row: collapse | name | status | bind toggle ───────────────
         header = stack.row(align=True)
-        # The big activate button shows the part name, but only when the chain
-        # is expanded, bound, and not drawing (otherwise that button is absent
-        # or shows a tool name). Keep the name on the header in every other
-        # state so it never disappears — and never draws twice.
-        name_on_button = chain.ui_expanded and is_bound and not is_drawing
         header.prop(chain, "ui_expanded",
                     icon='TRIA_DOWN' if chain.ui_expanded else 'TRIA_RIGHT',
-                    text="" if name_on_button else chain.part_name, emboss=False)
+                    text="", emboss=False)
+        header.label(text=chain.part_name)
 
         status_sub = header.row(align=True)
         if is_drawing:

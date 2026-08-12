@@ -45,8 +45,9 @@ def draw_plotting_ui(layout, context, arm):
     reg_head.label(text="Registration", icon='PROPERTIES')
     reg_head.operator("gesturebone.append_essentials", text="", icon='FILE_REFRESH')
     # Switch back to the Gesture armature (kept here so it stays reachable from
-    # the top of the PLOTTING UI, mirroring the switch button on the GESTURE UI).
-    reg_head.operator("gesturebone.switch_armature", text="", icon=switch_icon,
+    # the top of the PLOTTING UI, mirroring the switch button on the GESTURE UI —
+    # same ARROW_LEFTRIGHT icon for consistency across both rig panels).
+    reg_head.operator("gesturebone.switch_armature", text="", icon='ARROW_LEFTRIGHT',
                       depress=props.gesture_active)
 
     col = box.column(align=True)

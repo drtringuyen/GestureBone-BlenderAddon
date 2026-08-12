@@ -1,6 +1,10 @@
 # GestureBone
 
-Rig and animate bendy characters by aligning them to curve bones
+Rig and animate bendy characters by aligning them to curve bones.
+
+> **Architecture:** see [ARCHITECTURE.md](ARCHITECTURE.md) for the current
+> design (two-rig PLOTTING/GESTURE model, unified `ChainDefinition`, module
+> layout, rig-generation pipeline, and build/deploy).
 
 ## Installation
 
@@ -29,34 +33,36 @@ python install.py
 ```
 GestureBone/
 ├── addons/GestureBone/
-│   ├── __init__.py              # Addon metadata & registration
-│   ├── properties.py            # Global properties
-│   ├── panels.py                # UI panels
-│   ├── infos.py                 # Info panel & debugging
-│   ├── module_*_operators.py    # Module operators
-│   ├── module_*_ui.py           # Module UI
-│   └── module_*_utils.py        # Module utilities
-├── manifest.toml                # Extension format metadata
-├── zip_addon.py                 # Build traditional ZIP
-├── build_extension.py           # Build Blender Extension
-├── install.py                   # Installation script
-├── requirements.txt             # Python dependencies
-└── README.md                    # This file
+│   ├── __init__.py         # Addon metadata & registration
+│   ├── properties.py       # Scene-level global properties
+│   ├── panels.py           # Infos panel + MainPanel (rig_type dispatch)
+│   ├── infos.py            # Build / reload / debug / console operators
+│   ├── module_manager.py   # Loads modules per modules_config.json
+│   └── modules/
+│       ├── shared/         # ChainDefinition, ArmatureProps, shared utils
+│       ├── plotting/       # PLOTTING rig: rig generation
+│       └── gesture/        # GESTURE rig: drawing & binding
+├── ARCHITECTURE.md         # Design overview (start here)
+├── manifest.toml           # Extension format metadata
+├── zip_addon.py            # Build traditional ZIP
+├── build_extension.py      # Build Blender Extension
+├── install.py              # Deploy + hot-reload (5.1 & 5.2)
+└── README.md               # This file
 ```
 
 ## Modules
 
-This addon is organized into modules. Each module is self-contained:
-- `module_example_operators.py` - Operators
-- `module_example_ui.py` - UI elements
-- `module_example_utils.py` - Utility functions
+The addon is split into three module packages under `modules/`:
+- **`shared`** — always loaded; the unified `ChainDefinition` /
+  `ArmatureProps` data model and common utilities.
+- **`plotting`** — the PLOTTING rig (rig generation).
+- **`gesture`** — the GESTURE rig (spline drawing & bone binding).
 
-Enable/disable modules in `addons/GestureBone/__init__.py`:
-```python
-MODULES = {
-    "example": True,  # Set to False to disable
-}
-```
+`plotting` and `gesture` are toggled in `modules_config.json`
+(`{ "plotting": true, "gesture": true }`) and registered by
+`module_manager.py`. Each module registers its operators; its UI is drawn
+inline from `panels.py` based on the active armature's `rig_type`. See
+[ARCHITECTURE.md](ARCHITECTURE.md) for the full picture.
 
 ## Global Properties
 
@@ -67,8 +73,9 @@ context.scene.gesturebone_props.debug_mode
 
 ## Debug Mode
 
-- Enable debug mode in the Info panel (N-Panel → GestureBone → Debug button)
-- Shows extra labels marked with `text_ctxt="extra-info-label"`
+- Enable debug mode in the Infos panel (N-Panel → GestureBone → Debug button)
+- Reveals the step-by-step rig-generation pipeline, per-chain property
+  readouts, the loaded-module list, and the armature override
 - Displays build time and version information
 
 ## Publishing
@@ -89,9 +96,10 @@ python build_extension.py
 ## Development Notes
 
 - Code files longer than 500 lines should be split into modules
-- All UI elements subscribe to the main panel in `panels.py`
-- Use `extra-info-label` markup for debug-only text
-- Run `install.py` after editing to auto-reload in Blender
+- Module UI is drawn inline from `panels.py` via `draw_plotting_ui` /
+  `draw_gesture_ui`, dispatched on the armature's `rig_type`
+- Run `python install.py` after editing to deploy to Blender 5.1 & 5.2 and
+  hot-reload the running instance (see [ARCHITECTURE.md](ARCHITECTURE.md) §7)
 
 ## License
 

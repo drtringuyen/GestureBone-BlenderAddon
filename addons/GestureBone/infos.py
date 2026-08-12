@@ -40,18 +40,37 @@ class GESTUREBONE_OT_Build(bpy.types.Operator):
         return {'FINISHED'}
 
 
+def _deferred_addon_reload():
+    """Disable→re-enable the addon from a timer, i.e. OUTSIDE any operator.
+
+    Reloading from inside gesturebone.reload's execute() unregisters the very
+    operator that is still mid-invoke; when it returns, Blender tries to build
+    its report pystring against a freed RNA type and crashes (seen on 5.1.2).
+    Running from a one-shot timer defers the disable until the operator has
+    fully returned and been reported.
+    """
+    import sys
+    addon = "GestureBone"
+    try:
+        bpy.ops.preferences.addon_disable(module=addon)
+        for m in [k for k in list(sys.modules) if k == addon or k.startswith(addon + ".")]:
+            del sys.modules[m]
+        bpy.ops.preferences.addon_enable(module=addon)
+    except Exception as e:
+        print(f"GestureBone: deferred reload failed: {e}")
+    return None  # one-shot: do not reschedule
+
+
 class GESTUREBONE_OT_Reload(bpy.types.Operator):
     bl_idname = "gesturebone.reload"
     bl_label  = "Reload Addon"
+    bl_options = {'INTERNAL'}  # not REGISTER: Blender won't build a repr/report for it
 
     def execute(self, context):
-        import sys
-        addon = "GestureBone"
-        bpy.ops.preferences.addon_disable(module=addon)
-        mods = [k for k in sys.modules if k == addon or k.startswith(addon + ".")]
-        for m in mods:
-            del sys.modules[m]
-        bpy.ops.preferences.addon_enable(module=addon)
+        # Defer the actual disable/enable so it never runs while this operator
+        # is still on the call stack (see _deferred_addon_reload docstring).
+        if not bpy.app.timers.is_registered(_deferred_addon_reload):
+            bpy.app.timers.register(_deferred_addon_reload, first_interval=0.01)
         return {'FINISHED'}
 
 

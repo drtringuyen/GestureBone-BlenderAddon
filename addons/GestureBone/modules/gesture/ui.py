@@ -136,11 +136,11 @@ def draw_gesture_ui(layout, context, arm):
                                     text=chain.part_name, icon='GREASEPENCIL')
             act.part_name = chain.part_name
 
-        dir_op = row.operator("gesturebone.switch_curve_direction", text="", icon='ARROW_LEFTRIGHT')
-        dir_op.part_name = chain.part_name
-
         apply_op = row.operator("gesturebone.apply_to_bone", text="", icon='SORT_ASC')
         apply_op.part_name = chain.part_name
+
+        dir_op = row.operator("gesturebone.switch_curve_direction", text="", icon='ARROW_LEFTRIGHT')
+        dir_op.part_name = chain.part_name
 
         del_op = row.operator("gesturebone.delete_baked_frames", text="", icon='KEY_DEHLT')
         del_op.part_name = chain.part_name

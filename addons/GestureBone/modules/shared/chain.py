@@ -201,6 +201,7 @@ class GESTUREBONE_PG_ChainDefinition(bpy.types.PropertyGroup):
         name="Gesture Spline",
         type=bpy.types.Object,
         poll=lambda self, obj: obj.type == 'CURVE',
+        override={'LIBRARY_OVERRIDABLE'},
     )
     control_point_count: IntProperty(name="Control Points", default=5, min=1, options={'HIDDEN'})
     control_bones: CollectionProperty(type=GESTUREBONE_PG_BoneName)
@@ -216,6 +217,7 @@ class GESTUREBONE_PG_ChainDefinition(bpy.types.PropertyGroup):
         name="Plotting Spline",
         type=bpy.types.Object,
         poll=lambda self, obj: obj.type == 'CURVE',
+        override={'LIBRARY_OVERRIDABLE'},
     )
     plotting_mode: EnumProperty(
         name="Plotting Mode",
@@ -230,6 +232,7 @@ class GESTUREBONE_PG_ChainDefinition(bpy.types.PropertyGroup):
         name="Gesture Rig",
         type=bpy.types.Object,
         description="The GESTURE armature that owns this chain's CTRL bones",
+        override={'LIBRARY_OVERRIDABLE'},
     )
     rig_completed_step: IntProperty(
         name="Rig Step",

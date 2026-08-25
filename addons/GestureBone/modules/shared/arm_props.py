@@ -49,7 +49,12 @@ class GESTUREBONE_PG_ArmatureProps(bpy.types.PropertyGroup):
     )
 
     # ── PLOTTING: chain list ───────────────────────────────────────────────────
-    chains: CollectionProperty(type=GESTUREBONE_PG_ChainDefinition)
+    # LIBRARY_OVERRIDABLE + USE_INSERTION so chain pointers persist on overrides
+    # (see modules/riglinking). The load_post relink handler is the safety net.
+    chains: CollectionProperty(
+        type=GESTUREBONE_PG_ChainDefinition,
+        override={'LIBRARY_OVERRIDABLE', 'USE_INSERTION'},
+    )
     active_chain_index: IntProperty(default=0, min=0)
 
     # ── PLOTTING: global rig-gen settings ─────────────────────────────────────
@@ -91,6 +96,7 @@ class GESTUREBONE_PG_ArmatureProps(bpy.types.PropertyGroup):
         name="Plotting Rig",
         type=bpy.types.Object,
         description="The PLOTTING (MetaRig) armature this GESTURE rig was generated from",
+        override={'LIBRARY_OVERRIDABLE'},
     )
 
 

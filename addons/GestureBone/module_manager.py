@@ -9,6 +9,7 @@ _LOADED = {}
 ALL_MODULES = [
     {"name": "plotting", "op": "gesturebone.toggle_plotting", "icon": "ARMATURE_DATA"},
     {"name": "gesture",  "op": "gesturebone.toggle_gesture",  "icon": "GREASEPENCIL"},
+    {"name": "riglinking", "op": "gesturebone.toggle_riglinking", "icon": "LINKED"},
 ]
 
 

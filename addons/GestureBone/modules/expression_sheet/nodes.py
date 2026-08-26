@@ -332,6 +332,85 @@ def _on_update(self, context):
     refresh_uv_from_bone_shared(self)
 
 
+# ---------------------------------------------------------------------------
+# Deferred tree mutation.
+#
+# init()/copy()/free() run *inside* the add/duplicate/delete node operators.
+# Adding or removing nodes in the CONTAINING tree from those callbacks (which
+# is what refresh_uv_from_bone_shared -> _ensure_uv_map_feed and free's UV Map
+# cleanup do) re-enters the operator and hangs Blender ("stall"). So copy()
+# and free() only schedule the work; a 0-delay timer performs the tree
+# mutation once the operator has returned and we're back in a normal context.
+# ---------------------------------------------------------------------------
+
+_pending_refresh_ptrs = set()
+
+
+def _iter_shared_containers():
+    seen = set()
+    for c in list(bpy.data.node_groups) + [m.node_tree for m in bpy.data.materials if m.node_tree]:
+        if c.as_pointer() in seen:
+            continue
+        seen.add(c.as_pointer())
+        yield c
+
+
+def _schedule_refresh(node):
+    _pending_refresh_ptrs.add(node.as_pointer())
+    if not bpy.app.timers.is_registered(_process_pending):
+        bpy.app.timers.register(_process_pending, first_interval=0.0)
+
+
+def _schedule_cleanup():
+    # No node pointer to track (the node is being deleted) -- the timer scans
+    # for orphans. Reuse the same one-shot timer.
+    if not bpy.app.timers.is_registered(_process_pending):
+        bpy.app.timers.register(_process_pending, first_interval=0.0)
+
+
+def _process_pending():
+    global _pending_refresh_ptrs
+    ptrs = _pending_refresh_ptrs
+    _pending_refresh_ptrs = set()
+    for c in _iter_shared_containers():
+        # 1) refresh freshly-duplicated nodes (identified by pointer)
+        if ptrs:
+            for n in list(c.nodes):
+                if n.bl_idname == "ShaderNodeCustomUVFromBoneShared" and n.as_pointer() in ptrs:
+                    try:
+                        refresh_uv_from_bone_shared(n)
+                    except Exception as e:
+                        print("Expression Sheet: deferred refresh failed:", e)
+        # 2) remove orphaned auto UV Map feeds (owner node deleted) and drivers
+        #    pointing at nodes that no longer exist
+        for f in list(c.nodes):
+            if (f.bl_idname == 'ShaderNodeUVMap' and f.name.endswith(UVFB_UVMAP_SUFFIX)
+                    and f.outputs and not any(
+                        l.to_node.bl_idname == "ShaderNodeCustomUVFromBoneShared"
+                        for l in f.outputs[0].links)):
+                try:
+                    c.nodes.remove(f)
+                except Exception:
+                    pass
+        if c.animation_data:
+            our_sockets = ("Location", "Rotation", "Scale", "Mask Location", "Exp Index In")
+            for fc in list(c.animation_data.drivers):
+                dp = fc.data_path
+                if not (dp.startswith('nodes["') and '.inputs["' in dp):
+                    continue
+                parts = dp.split('"')
+                node_name = parts[1] if len(parts) > 1 else ""
+                socket_name = parts[3] if len(parts) > 3 else ""
+                # Only our own orphaned socket drivers (node gone) -- never
+                # touch unrelated drivers the user may have on other nodes.
+                if socket_name in our_sockets and c.nodes.get(node_name) is None:
+                    try:
+                        c.animation_data.drivers.remove(fc)
+                    except Exception:
+                        pass
+    return None  # one-shot
+
+
 class ShaderNodeCustomUVFromBoneShared(ShaderNodeCustomGroup):
     """Option B: shifts/rotates/scales a UV from a bone's local pose, using
     ONE shared internal group across all instances. Per-bone values are
@@ -361,21 +440,21 @@ class ShaderNodeCustomUVFromBoneShared(ShaderNodeCustomGroup):
         self.width = 200
 
     def copy(self, node):
-        # Duplicate: reference the SAME shared group; only rebuild drivers.
+        # Reference the SAME shared group (no per-node group). DON'T rebuild
+        # drivers / UV feed here: copy() runs inside the duplicate operator,
+        # and mutating the containing tree from here hangs Blender. Defer it.
         self.node_tree = get_shared_uv_tree()
-        refresh_uv_from_bone_shared(self)
+        _schedule_refresh(self)
 
     def free(self):
-        # Shared group is never removed on node delete. Just drop this
-        # instance's drivers + its auto UV Map node.
+        # Drop this instance's drivers now (safe -- animation data, not nodes).
         try:
             _clear_instance_drivers(self)
-            container = self.id_data
-            uvmap = container.nodes.get(self.name + UVFB_UVMAP_SUFFIX)
-            if uvmap is not None:
-                container.nodes.remove(uvmap)
         except Exception as e:
-            print("UVFromBoneShared free() skipped:", e)
+            print("UVFromBoneShared free() driver-clear skipped:", e)
+        # Removing the auto UV Map node mutates the tree, which is unsafe from
+        # inside the delete operator -- let the deferred timer sweep orphans.
+        _schedule_cleanup()
 
     def draw_buttons(self, context, layout):
         layout.prop(self, "armature_obj", text="")
@@ -436,6 +515,11 @@ def register():
 
 
 def unregister():
+    if bpy.app.timers.is_registered(_process_pending):
+        try:
+            bpy.app.timers.unregister(_process_pending)
+        except Exception:
+            pass
     for name in _MENU_TARGETS:
         menu = getattr(bpy.types, name, None)
         if menu is not None:

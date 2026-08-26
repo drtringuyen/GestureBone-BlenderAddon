@@ -1,5 +1,7 @@
 {
   "plotting": true,
   "gesture": true,
-  "riglinking": true
+  "riglinking": true,
+  "spritesheet": true,
+  "expression_sheet": true
 }

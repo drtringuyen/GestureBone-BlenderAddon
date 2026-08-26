@@ -29,6 +29,18 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the current design.
   Presentation-only; verified to draw on both Blender 5.1 and 5.2.
 
 ### Fixed (Aug 2026)
+- **Expression Sheet (shared) hung Blender on Library Override**: a material
+  node-tree driver targeting the gesture armature (the per-instance UV shift
+  values) triggers a pathological loop in Blender 5.2's override resolver on
+  this rig's dependency web (bisected: any single driver of this shape is
+  enough, independent of node count). Fixed by moving the driven values off
+  the material entirely — they now live as custom properties driven on every
+  mesh object that uses the material (object-level drivers are
+  override-safe), read back into the shader via a passive
+  `ShaderNodeAttribute` (`OBJECT` type) wired into each node's own input
+  sockets. Verified against a throwaway copy of the real character file:
+  material node-tree drivers 60 → 0, `make_override_library()` completes
+  (27 overrides) instead of hanging indefinitely.
 - **`gesturebone.reload` crashed Blender 5.1**: it disabled the addon
   synchronously inside its own `execute()`, so Blender built the operator's
   report string against a freed RNA type (`WM_operator_pystring` null-deref).

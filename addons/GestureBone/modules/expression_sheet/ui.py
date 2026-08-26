@@ -15,8 +15,7 @@ class GESTUREBONE_PT_ExpressionSheet(bpy.types.Panel):
         # panel is just a pointer to where the nodes live.
         col = self.layout.column(align=True)
         col.label(text="Shader Editor > Add:", icon='NODETREE')
-        col.label(text="- UV From Bone", icon='UV')
-        col.label(text="- Bone Info", icon='BONE_DATA')
+        col.label(text="- UV From Bone (Shared)", icon='UV')
 
 
 def register():

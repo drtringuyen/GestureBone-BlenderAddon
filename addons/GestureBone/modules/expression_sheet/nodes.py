@@ -498,8 +498,15 @@ _pending_refresh_ptrs = set()
 
 
 def _iter_shared_containers():
+    """Shader node trees only -- our node type only ever lives in materials
+    or the shared group. Scanning bpy.data.node_groups unfiltered would also
+    walk Geometry Nodes / Compositor trees (GestureBone's rigs are full of
+    GN modifier trees), and touching an unrelated node's .bl_idname there has
+    been observed to crash Blender (EXCEPTION_ACCESS_VIOLATION reading a
+    node's typeinfo) on some files -- see [[library-override-hang]]."""
     seen = set()
-    for c in list(bpy.data.node_groups) + [m.node_tree for m in bpy.data.materials if m.node_tree]:
+    shader_groups = [g for g in bpy.data.node_groups if isinstance(g, bpy.types.ShaderNodeTree)]
+    for c in shader_groups + [m.node_tree for m in bpy.data.materials if m.node_tree]:
         if c.as_pointer() in seen:
             continue
         seen.add(c.as_pointer())
@@ -524,36 +531,48 @@ def _process_pending():
     ptrs = _pending_refresh_ptrs
     _pending_refresh_ptrs = set()
     for c in _iter_shared_containers():
-        # 1) refresh freshly-duplicated nodes (identified by pointer)
+        # 1) refresh freshly-duplicated nodes (identified by pointer).
+        #    Resolve pointers to NAMES first: refreshing mutates this tree and
+        #    invalidates every other pointer in a stale snapshot (same
+        #    use-after-free as in migrate_legacy_drivers below).
         if ptrs:
-            for n in list(c.nodes):
-                if n.bl_idname == "ShaderNodeCustomUVFromBoneShared" and n.as_pointer() in ptrs:
-                    try:
-                        refresh_uv_from_bone_shared(n)
-                    except Exception as e:
-                        print("Expression Sheet: deferred refresh failed:", e)
-        # 2) remove orphaned auto UV Map feeds (owner node deleted) and drivers
-        #    pointing at nodes that no longer exist
-        for f in list(c.nodes):
+            names = [n.name for n in c.nodes
+                     if n.bl_idname == "ShaderNodeCustomUVFromBoneShared"
+                     and n.as_pointer() in ptrs]
+            for name in names:
+                n = c.nodes.get(name)
+                if n is None:
+                    continue
+                try:
+                    refresh_uv_from_bone_shared(n)
+                except Exception as e:
+                    print("Expression Sheet: deferred refresh failed:", e)
+        # 2) remove orphaned auto UV Map / Attribute feeds (owner node deleted)
+        #    and drivers pointing at nodes that no longer exist. Decide first,
+        #    remove after: removing mid-iteration invalidates the remaining
+        #    pointers in the snapshot (see migrate_legacy_drivers below).
+        orphan_names = []
+        for f in c.nodes:
             if (f.bl_idname == 'ShaderNodeUVMap' and f.name.endswith(UVFB_UVMAP_SUFFIX)
                     and f.outputs and not any(
                         l.to_node.bl_idname == "ShaderNodeCustomUVFromBoneShared"
                         for l in f.outputs[0].links)):
-                try:
-                    c.nodes.remove(f)
-                except Exception:
-                    pass
+                orphan_names.append(f.name)
                 continue
             if f.bl_idname == 'ShaderNodeAttribute':
                 for suffix in ATTR_SUFFIX.values():
                     if f.name.endswith(suffix):
-                        owner_name = f.name[:-len(suffix)]
-                        if c.nodes.get(owner_name) is None:
-                            try:
-                                c.nodes.remove(f)
-                            except Exception:
-                                pass
+                        if c.nodes.get(f.name[:-len(suffix)]) is None:
+                            orphan_names.append(f.name)
                         break
+        for name in orphan_names:
+            f = c.nodes.get(name)
+            if f is None:
+                continue
+            try:
+                c.nodes.remove(f)
+            except Exception:
+                pass
         if c.animation_data:
             our_sockets = ("Location", "Rotation", "Scale", "Mask Location", "Exp Index In")
             for fc in list(c.animation_data.drivers):
@@ -656,24 +675,45 @@ def migrate_legacy_drivers():
     """
     n = 0
     for c in _iter_shared_containers():
-        for node in list(c.nodes):
-            if node.bl_idname == "ShaderNodeCustomUVFromBoneShared":
-                try:
-                    refresh_uv_from_bone_shared(node)
-                    n += 1
-                except Exception as e:
-                    print("Expression Sheet: legacy-driver migration failed for", node.name, e)
+        # Snapshot NAMES, never node pointers. refresh_uv_from_bone_shared()
+        # adds/removes feed nodes in this same tree, which invalidates the
+        # other bNode pointers held in a stale list(c.nodes) -- reading
+        # .bl_idname off one then crashes Blender (EXCEPTION_ACCESS_VIOLATION
+        # in Node_bl_idname_length). Re-fetch by name each iteration instead.
+        names = [nd.name for nd in c.nodes
+                 if nd.bl_idname == "ShaderNodeCustomUVFromBoneShared"]
+        for name in names:
+            node = c.nodes.get(name)
+            if node is None:
+                continue
+            try:
+                refresh_uv_from_bone_shared(node)
+                n += 1
+            except Exception as e:
+                print("Expression Sheet: legacy-driver migration failed for", name, e)
     return n
 
 
-@persistent
-def _migrate_on_load(_dummy):
+def _run_migration_deferred():
     try:
         n = migrate_legacy_drivers()
         if n:
             print(f"GestureBone/ExpressionSheet: checked {n} UV From Bone (Shared) node(s) for legacy drivers on load")
     except Exception as e:
         print(f"GestureBone/ExpressionSheet: legacy-driver migration on load failed: {e!r}")
+    return None  # one-shot
+
+
+@persistent
+def _migrate_on_load(_dummy):
+    # Defer off the synchronous load_post callback: node/typeinfo data isn't
+    # guaranteed fully settled the instant a file finishes loading, and a
+    # crash was observed here on real files (EXCEPTION_ACCESS_VIOLATION
+    # reading a node's bl_idname) -- see [[library-override-hang]]. A 0-delay
+    # timer runs once Blender is back to idle, same pattern already used for
+    # copy()/free()'s deferred tree mutation above.
+    if not bpy.app.timers.is_registered(_run_migration_deferred):
+        bpy.app.timers.register(_run_migration_deferred, first_interval=0.0)
 
 
 def register():
@@ -711,11 +751,12 @@ def register():
             menu.append(_menu_draw)
     if _migrate_on_load not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(_migrate_on_load)
-    # Also repair the file that is already open when the module is enabled.
-    try:
-        migrate_legacy_drivers()
-    except Exception:
-        pass
+    # Also repair the file that is already open when the module is enabled
+    # (deferred -- register() runs during addon-enable, which can't safely
+    # touch bpy.data yet; same _RestrictData timing issue documented on
+    # get_shared_uv_tree()/build_shared_uv_tree() elsewhere in this file).
+    if not bpy.app.timers.is_registered(_run_migration_deferred):
+        bpy.app.timers.register(_run_migration_deferred, first_interval=0.0)
 
 
 def unregister():

@@ -256,6 +256,43 @@ def _target_objects(node):
     return objs
 
 
+def _resolve_driver_armature(armature, obj):
+    """The armature a driver should actually sample for *obj*.
+
+    On a linked+overridden character the node's `armature_obj` necessarily
+    points at the LINKED armature (the node lives in linked material data).
+    But the user poses the local library OVERRIDE of that armature, and the
+    linked original never moves -- so drivers built against it are frozen and
+    the expression never changes. Resolve to the local override instead.
+
+    Only kicks in when the armature is linked AND a local override of it
+    exists; plain local rigs are returned untouched.
+    """
+    if armature is None or not armature.library:
+        return armature
+    cands = [o for o in bpy.data.objects
+             if o.type == 'ARMATURE' and o.override_library
+             and o.override_library.reference == armature]
+    if not cands:
+        return armature
+    if len(cands) == 1:
+        return cands[0]
+    # Several overridden copies of the same linked character in one scene:
+    # pick the one sharing this mesh's override hierarchy, else its collections.
+    obj_ov = getattr(obj, "override_library", None)
+    root = getattr(obj_ov, "hierarchy_root", None) if obj_ov else None
+    if root is not None:
+        for c in cands:
+            c_ov = getattr(c, "override_library", None)
+            if c_ov is not None and getattr(c_ov, "hierarchy_root", None) == root:
+                return c
+    obj_colls = {c.name for c in obj.users_collection}
+    for c in cands:
+        if obj_colls & {cc.name for cc in c.users_collection}:
+            return c
+    return sorted(cands, key=lambda o: o.name)[0]
+
+
 def _clear_instance_props_and_drivers(node):
     """Remove this node's driven custom properties (and their drivers) from
     EVERY mesh object, not just the current targets -- so a stale prop left
@@ -447,12 +484,13 @@ def refresh_uv_from_bone_shared(node):
         key = _prop_key(container, node, socket_name)
         for obj in targets:
             _ensure_prop(obj, key, 3)
+            drv_arm = _resolve_driver_armature(armature, obj)
             for i, ttype in enumerate(types):
                 if flags[i]:
                     expr = "-bone" if mode == "negate" else "2-bone"
                 else:
                     expr = "bone"
-                _add_transform_driver_on_prop(obj, key, i, armature, bone, ttype,
+                _add_transform_driver_on_prop(obj, key, i, drv_arm, bone, ttype,
                                               'LOCAL_SPACE', expr)
         _ensure_attr_feed(node, socket_name, key, y_off)
         y_off -= 80
@@ -461,21 +499,27 @@ def refresh_uv_from_bone_shared(node):
     mask_key = _prop_key(container, node, "Mask Location")
     for obj in targets:
         _ensure_prop(obj, mask_key, 3)
+        drv_arm = _resolve_driver_armature(armature, obj)
         for i, ttype in enumerate(("LOC_X", "LOC_Y")):
-            _add_transform_driver_on_prop(obj, mask_key, i, armature, bone, ttype,
+            _add_transform_driver_on_prop(obj, mask_key, i, drv_arm, bone, ttype,
                                           'LOCAL_SPACE', "bone")
     _ensure_attr_feed(node, "Mask Location", mask_key, y_off)
     y_off -= 80
 
-    # Exp Index: custom property on the pose bone, if present.
+    # Exp Index: custom property on the pose bone, if present. Check the
+    # armature the drivers will actually sample (the override, when linked) --
+    # that's where the animator's keyed exp_index lives.
     prop_name = (node.index_prop_name or "exp_index").strip()
-    pbone = armature.pose.bones.get(bone)
+    check_arm = _resolve_driver_armature(armature, targets[0])
+    pbone = check_arm.pose.bones.get(bone) or armature.pose.bones.get(bone)
     if prop_name and pbone is not None and prop_name in pbone.keys():
         exp_key = _prop_key(container, node, "Exp Index In")
         data_path = 'pose.bones["{}"]["{}"]'.format(bone, prop_name)
         for obj in targets:
             _ensure_prop(obj, exp_key, None)
-            _add_singleprop_driver_on_prop(obj, exp_key, armature, data_path)
+            _add_singleprop_driver_on_prop(obj, exp_key,
+                                           _resolve_driver_armature(armature, obj),
+                                           data_path)
         _ensure_attr_feed(node, "Exp Index In", exp_key, y_off)
 
 

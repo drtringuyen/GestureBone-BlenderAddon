@@ -45,6 +45,30 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the current design.
   synchronously inside its own `execute()`, so Blender built the operator's
   report string against a freed RNA type (`WM_operator_pystring` null-deref).
   Now deferred to a `bpy.app.timers` callback and marked `INTERNAL`.
+- **Chain/armature properties couldn't be edited on a library-overridden
+  armature**: `GESTUREBONE_PG_ChainDefinition`, `GESTUREBONE_PG_BoneName`, and
+  `GESTUREBONE_PG_ArmatureProps` only tagged their `PointerProperty` fields
+  `override={'LIBRARY_OVERRIDABLE'}`; every other field (`ui_expanded`,
+  `part_name`, `control_mode`, `is_bound`, `show_debug_steps`, `rig_type`,
+  etc.) was locked read-only once the owning armature was an override
+  data-block (e.g. the chain-list foldout couldn't expand). Added the tag to
+  every user-editable property in all three classes, plus `USE_INSERTION` on
+  `control_bones` to match `chains`. This is declared on the class definition
+  itself, so it applies to every armature — old or new — without any
+  per-file migration.
+- **Expression Sheet hang reappeared on the real production file**: the
+  object-level-driver fix above was deployed in code but only ever *run* on a
+  throwaway test copy, never on the actual `CHR_LittlePig.blend` — so linking
+  it still carried the original 60 material node-tree drivers and hung
+  `make_override_library()` again. Migrated and saved the real file (60 → 0
+  material drivers, → 780 object drivers; override then completes in ~0.04s,
+  27 overrides). More importantly, added a `persistent` `load_post` handler
+  (`migrate_legacy_drivers` / `_migrate_on_load` in
+  `modules/expression_sheet/nodes.py`, mirroring the existing pattern in
+  `modules/riglinking/__init__.py`) that force-refreshes every
+  `UVFromBoneShared` node on **every file open**, not just when a node
+  property changes. Closes the gap where a file could be opened and
+  overridden before ever triggering the old lazy self-heal.
 
 ### Tooling (Aug 2026)
 - **`install.py`** deploys to a list of Blender versions (`["5.1", "5.2"]`;

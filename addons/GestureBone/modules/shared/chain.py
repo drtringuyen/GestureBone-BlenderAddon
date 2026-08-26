@@ -150,18 +150,19 @@ def bone_names(chain):
 # ── Property groups ────────────────────────────────────────────────────────────
 
 class GESTUREBONE_PG_BoneName(bpy.types.PropertyGroup):
-    bone: StringProperty(name="Bone", search=_bone_search)
+    bone: StringProperty(name="Bone", search=_bone_search, override={'LIBRARY_OVERRIDABLE'})
 
 
 class GESTUREBONE_PG_ChainDefinition(bpy.types.PropertyGroup):
     """Unified chain: identity + rig-gen config + gesture/draw config + state."""
 
     # ── Identity ──────────────────────────────────────────────────────────────
-    part_name: StringProperty(name="Name", default="Chain")
+    part_name: StringProperty(name="Name", default="Chain", override={'LIBRARY_OVERRIDABLE'})
     active_tool: EnumProperty(
         name="Active Tool",
         items=[('DRAW', 'Draw', ''), ('EDIT', 'Edit', '')],
         default='DRAW',
+        override={'LIBRARY_OVERRIDABLE'},
     )
 
     # ── Rig-generation config (was MetaBoneSettings) ─────────────────────────
@@ -169,12 +170,14 @@ class GESTUREBONE_PG_ChainDefinition(bpy.types.PropertyGroup):
         name="Template",
         description="Template collection for this bone — leave empty to use the global fallback",
         search=_collection_search,
+        override={'LIBRARY_OVERRIDABLE'},
     )
     control_mode: EnumProperty(
         name="Control Mode",
         items=CONTROL_MODES,
         default='PT_5',
         update=_on_control_mode_update,
+        override={'LIBRARY_OVERRIDABLE'},
     )
     pivot_placement: EnumProperty(
         name="Pivot Placement",
@@ -183,17 +186,20 @@ class GESTUREBONE_PG_ChainDefinition(bpy.types.PropertyGroup):
             ('CENTER', "At Center",  "Slide to MetaBone midpoint",                     'SNAP_MIDPOINT', 1),
         ],
         default='ORIGIN',
+        override={'LIBRARY_OVERRIDABLE'},
     )
     bind_mesh: PointerProperty(
         type=bpy.types.Object,
         name="Bind to Mesh",
         description="Source mesh to copy into this bone's Sample Mesh",
         poll=_mesh_object_poll,
+        override={'LIBRARY_OVERRIDABLE'},
     )
     sample_mesh: PointerProperty(
         type=bpy.types.Object,
         name="Sample Mesh",
         description="Auto-set in Step 9 — the generated sample mesh for this bone",
+        override={'LIBRARY_OVERRIDABLE'},
     )
 
     # ── Gesture/draw config (was CurveBoneChain) ─────────────────────────────
@@ -203,15 +209,16 @@ class GESTUREBONE_PG_ChainDefinition(bpy.types.PropertyGroup):
         poll=lambda self, obj: obj.type == 'CURVE',
         override={'LIBRARY_OVERRIDABLE'},
     )
-    control_point_count: IntProperty(name="Control Points", default=5, min=1, options={'HIDDEN'})
-    control_bones: CollectionProperty(type=GESTUREBONE_PG_BoneName)
+    control_point_count: IntProperty(name="Control Points", default=5, min=1, options={'HIDDEN'}, override={'LIBRARY_OVERRIDABLE'})
+    control_bones: CollectionProperty(type=GESTUREBONE_PG_BoneName, override={'LIBRARY_OVERRIDABLE', 'USE_INSERTION'})
     bone_handle_smoothness: FloatProperty(
         name="Bone Handle Smoothness",
         description="Drives 'Bone Handle Smoothness' socket on the gesture spline's TOB-Gesture_drawing modifier",
         default=1.0, min=0.1, max=5.0,
         update=_on_handle_smoothness_update,
+        override={'LIBRARY_OVERRIDABLE'},
     )
-    control_bones_expanded: BoolProperty(name="Control Bones", default=False)
+    control_bones_expanded: BoolProperty(name="Control Bones", default=False, override={'LIBRARY_OVERRIDABLE'})
 
     plotting_spline: PointerProperty(
         name="Plotting Spline",
@@ -224,8 +231,9 @@ class GESTUREBONE_PG_ChainDefinition(bpy.types.PropertyGroup):
         items=PLOTTING_MODES,
         default='SYM_10',
         update=_on_plotting_mode_update,
+        override={'LIBRARY_OVERRIDABLE'},
     )
-    plotting_point_count: IntProperty(name="Plotting Points", default=10, min=1, options={'HIDDEN'})
+    plotting_point_count: IntProperty(name="Plotting Points", default=10, min=1, options={'HIDDEN'}, override={'LIBRARY_OVERRIDABLE'})
 
     # ── Workflow state ─────────────────────────────────────────────────────────
     gesture_rig: PointerProperty(
@@ -239,13 +247,14 @@ class GESTUREBONE_PG_ChainDefinition(bpy.types.PropertyGroup):
         default=0,
         description="Highest rig-generation step completed for this chain (0=none, 14=fully done)",
         options={'HIDDEN'},
+        override={'LIBRARY_OVERRIDABLE'},
     )
-    is_bound: BoolProperty(name="Bound", default=False)
-    is_drawing: BoolProperty(name="Drawing", default=False)
-    drawing_frame: IntProperty(name="Drawing Frame", default=-1)
+    is_bound: BoolProperty(name="Bound", default=False, override={'LIBRARY_OVERRIDABLE'})
+    is_drawing: BoolProperty(name="Drawing", default=False, override={'LIBRARY_OVERRIDABLE'})
+    drawing_frame: IntProperty(name="Drawing Frame", default=-1, override={'LIBRARY_OVERRIDABLE'})
 
     # ── UI collapse state ──────────────────────────────────────────────────────
-    ui_expanded: BoolProperty(name="Expanded", default=False)
+    ui_expanded: BoolProperty(name="Expanded", default=False, override={'LIBRARY_OVERRIDABLE'})
 
 
 def register():

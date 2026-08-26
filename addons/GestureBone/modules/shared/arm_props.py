@@ -46,6 +46,7 @@ class GESTUREBONE_PG_ArmatureProps(bpy.types.PropertyGroup):
             ('NONE',     "Untagged", ""),
         ],
         default='NONE',
+        override={'LIBRARY_OVERRIDABLE'},
     )
 
     # ── PLOTTING: chain list ───────────────────────────────────────────────────
@@ -55,7 +56,7 @@ class GESTUREBONE_PG_ArmatureProps(bpy.types.PropertyGroup):
         type=GESTUREBONE_PG_ChainDefinition,
         override={'LIBRARY_OVERRIDABLE', 'USE_INSERTION'},
     )
-    active_chain_index: IntProperty(default=0, min=0)
+    active_chain_index: IntProperty(default=0, min=0, override={'LIBRARY_OVERRIDABLE'})
 
     # ── PLOTTING: global rig-gen settings ─────────────────────────────────────
     meta_collection: StringProperty(
@@ -63,33 +64,37 @@ class GESTUREBONE_PG_ArmatureProps(bpy.types.PropertyGroup):
         default="META",
         description="Bone collection on this armature that contains the MetaBones",
         search=_bone_coll_search,
+        override={'LIBRARY_OVERRIDABLE'},
     )
     atomic_chain: StringProperty(
         name="Global Template",
         description="Fallback atomic chain template used when a chain has no per-bone override",
         search=_collection_search,
+        override={'LIBRARY_OVERRIDABLE'},
     )
     meta_rig_preset: StringProperty(
         name="Rig Preset",
         description="PRESET armature to duplicate when creating this rig (shown in Create Rig dialog)",
+        override={'LIBRARY_OVERRIDABLE'},
     )
 
     # ── PLOTTING: workflow state ───────────────────────────────────────────────
-    wip_coll:            StringProperty(options={'HIDDEN'})
-    wip_empty:           StringProperty(options={'HIDDEN'})
-    wip_token:           StringProperty(options={'HIDDEN'})
-    last_step:           StringProperty(options={'HIDDEN'})
-    completed_step:      IntProperty(default=0, options={'HIDDEN'})
-    is_aligning:         BoolProperty(default=False, options={'HIDDEN'})
+    wip_coll:            StringProperty(options={'HIDDEN'}, override={'LIBRARY_OVERRIDABLE'})
+    wip_empty:           StringProperty(options={'HIDDEN'}, override={'LIBRARY_OVERRIDABLE'})
+    wip_token:           StringProperty(options={'HIDDEN'}, override={'LIBRARY_OVERRIDABLE'})
+    last_step:           StringProperty(options={'HIDDEN'}, override={'LIBRARY_OVERRIDABLE'})
+    completed_step:      IntProperty(default=0, options={'HIDDEN'}, override={'LIBRARY_OVERRIDABLE'})
+    is_aligning:         BoolProperty(default=False, options={'HIDDEN'}, override={'LIBRARY_OVERRIDABLE'})
     active_bone_name:    StringProperty(options={'HIDDEN'},
-                         description="Current MetaBone being processed — set by RigPart/AutoRig")
+                         description="Current MetaBone being processed — set by RigPart/AutoRig",
+                         override={'LIBRARY_OVERRIDABLE'})
 
     # ── PLOTTING: UI toggles ───────────────────────────────────────────────────
-    meta_solo_mode:     BoolProperty(name="META Solo",          default=False)
-    gesture_active:     BoolProperty(name="Gesture Active",     default=False)
-    show_both_armatures: BoolProperty(name="Show Both",         default=True)
-    show_generate_part: BoolProperty(name="Generate Part by Part", default=True)
-    show_debug_steps:   BoolProperty(name="Debug Steps",        default=False)
+    meta_solo_mode:     BoolProperty(name="META Solo",          default=False, override={'LIBRARY_OVERRIDABLE'})
+    gesture_active:     BoolProperty(name="Gesture Active",     default=False, override={'LIBRARY_OVERRIDABLE'})
+    show_both_armatures: BoolProperty(name="Show Both",         default=True, override={'LIBRARY_OVERRIDABLE'})
+    show_generate_part: BoolProperty(name="Generate Part by Part", default=True, override={'LIBRARY_OVERRIDABLE'})
+    show_debug_steps:   BoolProperty(name="Debug Steps",        default=False, override={'LIBRARY_OVERRIDABLE'})
 
     # ── GESTURE: back-pointer to the PLOTTING rig ─────────────────────────────
     plotting_rig: PointerProperty(

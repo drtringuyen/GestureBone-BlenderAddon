@@ -17,6 +17,7 @@ module's __init__.py.
 import bpy
 from bpy.types import ShaderNodeCustomGroup
 from bpy.props import PointerProperty, StringProperty, BoolProperty
+from bpy.app.handlers import persistent
 
 SHARED_GROUP_NAME = ".UVFromBoneShared"
 UVFB_UVMAP_SUFFIX = "__UVForBone"   # auto-created UV Map node name suffix
@@ -642,6 +643,39 @@ def _menu_draw(self, context):
 _MENU_TARGETS = ("NODE_MT_add", "NODE_MT_category_shader_input")
 
 
+def migrate_legacy_drivers():
+    """Force-refresh every UVFromBoneShared instance so any material node-tree
+    drivers left over from the pre-fix design are stripped and rebuilt as
+    override-safe object-property drivers (see [[library-override-hang]]).
+
+    refresh_uv_from_bone_shared() only self-heals lazily when a node's own
+    property changes, so a file opened (or linked) and immediately overridden
+    without touching any node would still carry the hang-triggering material
+    drivers. Called eagerly from a load_post handler below so every file is
+    always safe before the user gets a chance to hit Make Library Override.
+    """
+    n = 0
+    for c in _iter_shared_containers():
+        for node in list(c.nodes):
+            if node.bl_idname == "ShaderNodeCustomUVFromBoneShared":
+                try:
+                    refresh_uv_from_bone_shared(node)
+                    n += 1
+                except Exception as e:
+                    print("Expression Sheet: legacy-driver migration failed for", node.name, e)
+    return n
+
+
+@persistent
+def _migrate_on_load(_dummy):
+    try:
+        n = migrate_legacy_drivers()
+        if n:
+            print(f"GestureBone/ExpressionSheet: checked {n} UV From Bone (Shared) node(s) for legacy drivers on load")
+    except Exception as e:
+        print(f"GestureBone/ExpressionSheet: legacy-driver migration on load failed: {e!r}")
+
+
 def register():
     # Idempotent: register() can run when the class is already registered
     # (prior module toggle, addon reload, or dev standalone run). Node classes
@@ -675,9 +709,18 @@ def register():
                     if getattr(f, "__name__", "") == "_menu_draw":
                         funcs.remove(f)
             menu.append(_menu_draw)
+    if _migrate_on_load not in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.append(_migrate_on_load)
+    # Also repair the file that is already open when the module is enabled.
+    try:
+        migrate_legacy_drivers()
+    except Exception:
+        pass
 
 
 def unregister():
+    if _migrate_on_load in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(_migrate_on_load)
     if bpy.app.timers.is_registered(_process_pending):
         try:
             bpy.app.timers.unregister(_process_pending)

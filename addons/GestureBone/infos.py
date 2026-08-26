@@ -166,14 +166,27 @@ class GESTUREBONE_OT_ToggleSpritesheet(bpy.types.Operator):
         return {'FINISHED'}
 
 
+
+class GESTUREBONE_OT_ToggleExpressionSheet(bpy.types.Operator):
+    """Toggle ExpressionSheet module on/off"""
+    bl_idname = "gesturebone.toggle_expression_sheet"
+    bl_label = "ExpressionSheet"
+
+    def execute(self, context):
+        from . import module_manager
+        module_manager.toggle("expression_sheet")
+        return {'FINISHED'}
+
 def register():
     for cls in _classes:
         bpy.utils.register_class(cls)
     bpy.utils.register_class(GESTUREBONE_OT_ToggleRiglinking)
     bpy.utils.register_class(GESTUREBONE_OT_ToggleSpritesheet)
+    bpy.utils.register_class(GESTUREBONE_OT_ToggleExpressionSheet)
 
 
 def unregister():
+    bpy.utils.unregister_class(GESTUREBONE_OT_ToggleExpressionSheet)
     bpy.utils.unregister_class(GESTUREBONE_OT_ToggleSpritesheet)
     bpy.utils.unregister_class(GESTUREBONE_OT_ToggleRiglinking)
     for cls in reversed(_classes):

@@ -195,28 +195,106 @@ def get_shared_uv_tree():
 
 
 # ---------------------------------------------------------------------------
-# Per-instance drivers: live on the node's OWN input sockets, in whatever
-# tree contains the node (usually a material).
+# Per-instance drivers.
+#
+# IMPORTANT: these must NOT live on the material node tree. A material
+# node-tree driver that targets an armature (via TRANSFORMS or SINGLE_PROP)
+# hangs Blender's Library Override resolver on this rig's dependency web
+# (bisected -- see the library-override-hang project memory). The fix is to
+# drive OBJECT custom properties on the mesh(es) using the material instead
+# (object-level drivers are override-safe), and have the material read them
+# back with a passive ShaderNodeAttribute (attribute_type='OBJECT') wired
+# into the node's own input sockets -- see _ensure_attr_feed below.
 # ---------------------------------------------------------------------------
 
-def _socket_path(node_name, socket_name):
+def _legacy_socket_path(node_name, socket_name):
     return 'nodes["{}"].inputs["{}"].default_value'.format(node_name, socket_name)
 
 
-def _clear_instance_drivers(node):
-    container = node.id_data           # the node tree that holds this node
+def _clear_legacy_socket_drivers(node):
+    """Remove old-style drivers directly on this node's own input sockets
+    (pre-fix Design B files). Safe/cheap no-op once migrated."""
+    container = node.id_data
     name = node.name
     for socket_name in ("Location", "Rotation", "Scale", "Mask Location"):
         for i in range(3):
-            container.driver_remove(_socket_path(name, socket_name), i)
-    container.driver_remove(_socket_path(name, "Exp Index In"))
+            container.driver_remove(_legacy_socket_path(name, socket_name), i)
+    container.driver_remove(_legacy_socket_path(name, "Exp Index In"))
 
 
-def _add_transform_driver_on_socket(container, node_name, socket_name, comp_index,
-                                     armature, bone, ttype, space, expression="bone"):
-    path = _socket_path(node_name, socket_name)
-    container.driver_remove(path, comp_index)
-    fcurve = container.driver_add(path, comp_index)
+def _prop_key(container, node, socket_name):
+    """Unique custom-property name for one driven socket of one node
+    instance, namespaced by the node tree so multiple materials on the same
+    mesh object can't collide."""
+    return "{}::{}::{}".format(container.name, node.name, socket_name)
+
+
+def _materials_using_tree(tree):
+    return [m for m in bpy.data.materials if m.node_tree == tree]
+
+
+def _objects_using_material(mat):
+    return [o for o in bpy.data.objects
+            if o.type == 'MESH' and any(s.material == mat for s in o.material_slots)]
+
+
+def _target_objects(node):
+    """Mesh objects whose custom properties should carry this node's driven
+    values -- every mesh currently using a material built on this node's
+    containing tree. (If the tree isn't a material's own tree -- e.g. the
+    node lives nested in a plain node group -- there is nothing to target;
+    same limitation the old per-socket-driver design had.)"""
+    container = node.id_data
+    objs = []
+    seen = set()
+    for m in _materials_using_tree(container):
+        for o in _objects_using_material(m):
+            if o.name not in seen:
+                seen.add(o.name)
+                objs.append(o)
+    return objs
+
+
+def _clear_instance_props_and_drivers(node):
+    """Remove this node's driven custom properties (and their drivers) from
+    EVERY mesh object, not just the current targets -- so a stale prop left
+    behind by a since-changed material assignment doesn't linger."""
+    container = node.id_data
+    prefix = "{}::{}::".format(container.name, node.name)
+    for obj in bpy.data.objects:
+        if obj.type != 'MESH':
+            continue
+        for key in [k for k in obj.keys() if k.startswith(prefix)]:
+            try:
+                obj.driver_remove('["{}"]'.format(key))
+            except Exception:
+                pass
+            try:
+                del obj[key]
+            except Exception:
+                pass
+
+
+def _ensure_prop(obj, key, size):
+    """Create the custom property if missing (or wrong shape). size=None
+    means a plain float scalar; an int means a float array of that length."""
+    default = [0.0] * size if size else 0.0
+    if key not in obj.keys():
+        obj[key] = default
+        return
+    if size:
+        try:
+            if len(obj[key]) != size:
+                obj[key] = default
+        except TypeError:
+            obj[key] = default
+
+
+def _add_transform_driver_on_prop(obj, key, comp_index, armature, bone, ttype, space,
+                                   expression="bone"):
+    path = '["{}"]'.format(key)
+    obj.driver_remove(path, comp_index)
+    fcurve = obj.driver_add(path, comp_index)
     drv = fcurve.driver
     drv.type = 'SCRIPTED'
     drv.expression = expression
@@ -231,11 +309,10 @@ def _add_transform_driver_on_socket(container, node_name, socket_name, comp_inde
     tgt.rotation_mode = 'XYZ' if ttype.startswith('ROT') else 'AUTO'
 
 
-def _add_singleprop_driver_on_socket(container, node_name, socket_name,
-                                     armature, data_path, expression="prop"):
-    path = _socket_path(node_name, socket_name)
-    container.driver_remove(path)
-    fcurve = container.driver_add(path)
+def _add_singleprop_driver_on_prop(obj, key, armature, data_path, expression="prop"):
+    path = '["{}"]'.format(key)
+    obj.driver_remove(path)
+    fcurve = obj.driver_add(path)
     drv = fcurve.driver
     drv.type = 'SCRIPTED'
     drv.expression = expression
@@ -246,6 +323,62 @@ def _add_singleprop_driver_on_socket(container, node_name, socket_name,
     tgt.id_type = 'OBJECT'
     tgt.id = armature
     tgt.data_path = data_path
+
+
+# Auto-created ShaderNodeAttribute feeds, one per driven socket, named off
+# the owner node (like the existing UV Map feed) so they can be found again
+# and swept up as orphans.
+ATTR_SUFFIX = {
+    "Location": "__ATTR_Location",
+    "Rotation": "__ATTR_Rotation",
+    "Scale": "__ATTR_Scale",
+    "Mask Location": "__ATTR_MaskLoc",
+    "Exp Index In": "__ATTR_ExpIndex",
+}
+ATTR_OUTPUT = {
+    "Location": "Vector",
+    "Rotation": "Vector",
+    "Scale": "Vector",
+    "Mask Location": "Vector",
+    "Exp Index In": "Fac",
+}
+
+
+def _remove_attr_feeds(node):
+    container = node.id_data
+    for suffix in ATTR_SUFFIX.values():
+        attr = container.nodes.get(node.name + suffix)
+        if attr is not None:
+            try:
+                container.nodes.remove(attr)
+            except Exception:
+                pass
+
+
+def _ensure_attr_feed(node, socket_name, prop_key, y_offset):
+    container = node.id_data
+    attr_name = node.name + ATTR_SUFFIX[socket_name]
+    attr = container.nodes.get(attr_name)
+    if attr is None or attr.bl_idname != 'ShaderNodeAttribute':
+        if attr is not None:
+            try:
+                container.nodes.remove(attr)
+            except Exception:
+                pass
+        attr = container.nodes.new('ShaderNodeAttribute')
+        attr.name = attr_name
+    attr.label = "{} for {}".format(socket_name, node.name)
+    attr.location = (node.location.x - 220, node.location.y + y_offset)
+    attr.attribute_type = 'OBJECT'
+    attr.attribute_name = prop_key
+
+    sock = node.inputs.get(socket_name)
+    if sock is None:
+        return
+    out_socket = attr.outputs[ATTR_OUTPUT[socket_name]]
+    fed = sock.links and sock.links[0].from_socket == out_socket
+    if not fed:
+        container.links.new(out_socket, sock)
 
 
 def _ensure_uv_map_feed(node):
@@ -286,7 +419,9 @@ def refresh_uv_from_bone_shared(node):
     if amt is not None and amt.default_value != 1.0:
         amt.default_value = 1.0
 
-    _clear_instance_drivers(node)
+    _clear_legacy_socket_drivers(node)
+    _clear_instance_props_and_drivers(node)
+    _remove_attr_feeds(node)
 
     armature = node.armature_obj
     bone = node.bone_name
@@ -296,33 +431,51 @@ def refresh_uv_from_bone_shared(node):
         return
 
     container = node.id_data
+    targets = _target_objects(node)
+    if not targets:
+        return  # no mesh uses this material (yet) -- nothing to drive
+
     invert = {
         "Location": (node.invert_location_x, node.invert_location_y, False),
         "Rotation": (node.invert_rotation, node.invert_rotation, node.invert_rotation),
         "Scale":    (node.invert_scale_x, node.invert_scale_y, False),
     }
+    y_off = -60
     for socket_name, (types, mode) in DRIVEN_VEC_INPUTS.items():
         flags = invert[socket_name]
-        for i, ttype in enumerate(types):
-            if flags[i]:
-                expr = "-bone" if mode == "negate" else "2-bone"
-            else:
-                expr = "bone"
-            _add_transform_driver_on_socket(container, node.name, socket_name, i,
-                                            armature, bone, ttype, 'LOCAL_SPACE', expr)
+        key = _prop_key(container, node, socket_name)
+        for obj in targets:
+            _ensure_prop(obj, key, 3)
+            for i, ttype in enumerate(types):
+                if flags[i]:
+                    expr = "-bone" if mode == "negate" else "2-bone"
+                else:
+                    expr = "bone"
+                _add_transform_driver_on_prop(obj, key, i, armature, bone, ttype,
+                                              'LOCAL_SPACE', expr)
+        _ensure_attr_feed(node, socket_name, key, y_off)
+        y_off -= 80
 
     # Mask Location: local-space, non-inverted, X/Y only (Z stays 0).
-    for i, ttype in enumerate(("LOC_X", "LOC_Y")):
-        _add_transform_driver_on_socket(container, node.name, "Mask Location", i,
-                                        armature, bone, ttype, 'LOCAL_SPACE', "bone")
+    mask_key = _prop_key(container, node, "Mask Location")
+    for obj in targets:
+        _ensure_prop(obj, mask_key, 3)
+        for i, ttype in enumerate(("LOC_X", "LOC_Y")):
+            _add_transform_driver_on_prop(obj, mask_key, i, armature, bone, ttype,
+                                          'LOCAL_SPACE', "bone")
+    _ensure_attr_feed(node, "Mask Location", mask_key, y_off)
+    y_off -= 80
 
     # Exp Index: custom property on the pose bone, if present.
     prop_name = (node.index_prop_name or "exp_index").strip()
     pbone = armature.pose.bones.get(bone)
     if prop_name and pbone is not None and prop_name in pbone.keys():
+        exp_key = _prop_key(container, node, "Exp Index In")
         data_path = 'pose.bones["{}"]["{}"]'.format(bone, prop_name)
-        _add_singleprop_driver_on_socket(container, node.name, "Exp Index In",
-                                         armature, data_path)
+        for obj in targets:
+            _ensure_prop(obj, exp_key, None)
+            _add_singleprop_driver_on_prop(obj, exp_key, armature, data_path)
+        _ensure_attr_feed(node, "Exp Index In", exp_key, y_off)
 
 
 def _on_update(self, context):
@@ -389,6 +542,17 @@ def _process_pending():
                     c.nodes.remove(f)
                 except Exception:
                     pass
+                continue
+            if f.bl_idname == 'ShaderNodeAttribute':
+                for suffix in ATTR_SUFFIX.values():
+                    if f.name.endswith(suffix):
+                        owner_name = f.name[:-len(suffix)]
+                        if c.nodes.get(owner_name) is None:
+                            try:
+                                c.nodes.remove(f)
+                            except Exception:
+                                pass
+                        break
         if c.animation_data:
             our_sockets = ("Location", "Rotation", "Scale", "Mask Location", "Exp Index In")
             for fc in list(c.animation_data.drivers):
@@ -441,13 +605,19 @@ class ShaderNodeCustomUVFromBoneShared(ShaderNodeCustomGroup):
         _schedule_refresh(self)
 
     def free(self):
-        # Drop this instance's drivers now (safe -- animation data, not nodes).
+        # Drop this instance's drivers/props now (safe -- animation data and
+        # object custom properties on OTHER datablocks, not nodes in this tree).
         try:
-            _clear_instance_drivers(self)
+            _clear_legacy_socket_drivers(self)
         except Exception as e:
-            print("UVFromBoneShared free() driver-clear skipped:", e)
-        # Removing the auto UV Map node mutates the tree, which is unsafe from
-        # inside the delete operator -- let the deferred timer sweep orphans.
+            print("UVFromBoneShared free() legacy driver-clear skipped:", e)
+        try:
+            _clear_instance_props_and_drivers(self)
+        except Exception as e:
+            print("UVFromBoneShared free() prop/driver-clear skipped:", e)
+        # Removing the auto UV Map / Attribute feed nodes mutates the tree,
+        # which is unsafe from inside the delete operator -- let the
+        # deferred timer sweep orphans.
         _schedule_cleanup()
 
     def draw_buttons(self, context, layout):

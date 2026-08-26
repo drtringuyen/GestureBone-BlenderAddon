@@ -70,14 +70,40 @@ def _ensure_exp_index(pose_bone):
     return int(pose_bone[_EXP_PROP])
 
 
+def keying_blocked_reason(arm_obj):
+    """Why exp_index can't be keyed on *arm_obj*, or None if it can.
+
+    A linked + library-overridden character usually still points at the
+    library's own action, which is read-only. Blender then SKIPS keyframe
+    insertion with only a console warning ("not editable"), so the picked
+    expression silently fails to stick. Detect that up front and say so.
+    """
+    ad = arm_obj.animation_data
+    act = ad.action if ad else None
+    if act is None:
+        return None                      # no action yet: Blender makes one
+    editable = getattr(act, "is_editable", None)
+    if editable is None:                 # older Blender: fall back to linkage
+        editable = act.library is None
+    if not editable:
+        return ("Action '%s' is linked and read-only — assign a local action "
+                "(Dope Sheet > Action Editor > New) before keying expressions"
+                % act.name)
+    return None
+
+
 def _key_expression_change(context, arm_obj, bones, new_idx):
     """Apply *new_idx* to *bones*, keying a one-frame constant step.
 
     For each bone: if it already has keyframes on exp_index, key the previous
     value one frame earlier, then key the new value on the current frame. If it
     has never been keyed, just key the new value on the current frame.
+
+    Returns the names of bones whose keyframe insertion was refused (e.g. a
+    read-only action), so the caller can report instead of failing silently.
     """
     frame = context.scene.frame_current
+    failed = []
 
     for pb in bones:
         prev_value = _ensure_exp_index(pb)
@@ -90,10 +116,13 @@ def _key_expression_change(context, arm_obj, bones, new_idx):
             pb.keyframe_insert(data_path=f'["{_EXP_PROP}"]', frame=frame - 1)
 
         pb[_EXP_PROP] = new_idx
-        pb.keyframe_insert(data_path=f'["{_EXP_PROP}"]', frame=frame)
+        if not pb.keyframe_insert(data_path=f'["{_EXP_PROP}"]', frame=frame):
+            failed.append(pb.name)
 
         # keyframe_insert can (re)create the fcurve — re-fetch, then normalize.
         _force_constant(_bone_exp_fcurve(arm_obj, pb.name))
+
+    return failed
 
 
 # ── Operator ──────────────────────────────────────────────────────────────────
@@ -120,6 +149,11 @@ class GESTUREBONE_OT_PoseExpressionGrid(_SpriteGridBase):
         self._bones = [pb for pb in arm.pose.bones if pb.select]
         if not self._bones:
             return False
+        blocked = keying_blocked_reason(arm)
+        if blocked:
+            # Don't open the grid just to drop the pick on the floor.
+            self.report({'ERROR'}, blocked)
+            return False
         # Ensure exp_index exists and any existing keys on these bones' channels
         # are (still) CONSTANT before we show the grid.
         for pb in self._bones:
@@ -134,7 +168,11 @@ class GESTUREBONE_OT_PoseExpressionGrid(_SpriteGridBase):
         return min(_ensure_exp_index(active_pb), max_idx) if active_pb else -1
 
     def _commit(self, context, idx):
-        _key_expression_change(context, self._arm, self._bones, idx)
+        failed = _key_expression_change(context, self._arm, self._bones, idx)
+        if failed:
+            self.report({'ERROR'},
+                        "Could not key exp_index on %d bone(s) (%s) — the action "
+                        "is not editable" % (len(failed), ", ".join(failed[:3])))
 
 
 _addon_keymaps = []

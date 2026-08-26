@@ -1,5 +1,5 @@
 """
-spritesheet/props.py — unified grid settings for the Spritesheet module.
+expression_sheet/props.py — unified sprite-grid settings.
 
 Both the sprite-cell selector and the pose-expression grid share one set of
 grid settings, stored scene-level at ``context.scene.gesturebone_spritesheet``.

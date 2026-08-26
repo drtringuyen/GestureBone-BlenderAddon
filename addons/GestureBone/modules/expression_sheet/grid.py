@@ -1,5 +1,5 @@
 """
-spritesheet/grid.py — shared GPU sprite-grid widget.
+expression_sheet/grid.py — shared GPU sprite-grid widget.
 
 Both tools in this module draw the *same* modal grid: a sprite sheet sliced
 into ``grid_count**2`` square cells, placed at the mouse and picked by click.

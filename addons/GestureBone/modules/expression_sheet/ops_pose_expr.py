@@ -1,5 +1,5 @@
 """
-spritesheet/ops_pose_expr.py — Pose-mode expression grid (E key).
+expression_sheet/ops_pose_expr.py — Pose-mode expression grid (E key).
 
 Merged from the standalone PoseExpressionGrid script. Opens the shared sprite
 grid in Pose mode and keyframes each selected bone's ``exp_index`` as a

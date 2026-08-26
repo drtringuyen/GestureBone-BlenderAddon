@@ -1,5 +1,5 @@
 """
-spritesheet/ops_cell.py — sprite-cell selector.
+expression_sheet/ops_cell.py — sprite-cell selector.
 
 Merged from the standalone SpriteSheet script. Opens the shared sprite grid and
 stores the picked cell index on the active object's custom property

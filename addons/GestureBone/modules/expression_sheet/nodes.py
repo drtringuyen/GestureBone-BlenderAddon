@@ -401,10 +401,37 @@ _MENU_TARGETS = ("NODE_MT_add", "NODE_MT_category_shader_input")
 
 
 def register():
-    bpy.utils.register_class(ShaderNodeCustomUVFromBoneShared)
+    # Idempotent: register() can run when the class is already registered
+    # (prior module toggle, addon reload, or dev standalone run). Node classes
+    # don't reliably surface via getattr(bpy.types, ...), so we catch the
+    # "already registered" failure, drop the stale registration, and retry.
+    try:
+        bpy.utils.register_class(ShaderNodeCustomUVFromBoneShared)
+    except Exception:
+        try:
+            bpy.utils.unregister_class(ShaderNodeCustomUVFromBoneShared)
+        except Exception:
+            pass
+        existing = getattr(bpy.types, ShaderNodeCustomUVFromBoneShared.bl_idname, None)
+        if existing is not None and existing is not ShaderNodeCustomUVFromBoneShared:
+            try:
+                bpy.utils.unregister_class(existing)
+            except Exception:
+                pass
+        try:
+            bpy.utils.register_class(ShaderNodeCustomUVFromBoneShared)
+        except Exception as e:
+            print("Expression Sheet: could not register UV From Bone (Shared)", e)
     for name in _MENU_TARGETS:
         menu = getattr(bpy.types, name, None)
         if menu is not None:
+            # Strip any stale _menu_draw first so re-register can't stack
+            # duplicate Add-menu entries.
+            funcs = getattr(getattr(menu, "draw", None), "_draw_funcs", None)
+            if funcs:
+                for f in list(funcs):
+                    if getattr(f, "__name__", "") == "_menu_draw":
+                        funcs.remove(f)
             menu.append(_menu_draw)
 
 
@@ -416,4 +443,7 @@ def unregister():
                 menu.remove(_menu_draw)
             except Exception:
                 pass
-    bpy.utils.unregister_class(ShaderNodeCustomUVFromBoneShared)
+    try:
+        bpy.utils.unregister_class(ShaderNodeCustomUVFromBoneShared)
+    except Exception:
+        pass

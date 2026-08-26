@@ -154,13 +154,27 @@ class GESTUREBONE_OT_ToggleRiglinking(bpy.types.Operator):
         module_manager.toggle("riglinking")
         return {'FINISHED'}
 
+
+class GESTUREBONE_OT_ToggleSpritesheet(bpy.types.Operator):
+    """Toggle Spritesheet module on/off"""
+    bl_idname = "gesturebone.toggle_spritesheet"
+    bl_label = "Spritesheet"
+
+    def execute(self, context):
+        from . import module_manager
+        module_manager.toggle("spritesheet")
+        return {'FINISHED'}
+
+
 def register():
     for cls in _classes:
         bpy.utils.register_class(cls)
     bpy.utils.register_class(GESTUREBONE_OT_ToggleRiglinking)
+    bpy.utils.register_class(GESTUREBONE_OT_ToggleSpritesheet)
 
 
 def unregister():
+    bpy.utils.unregister_class(GESTUREBONE_OT_ToggleSpritesheet)
     bpy.utils.unregister_class(GESTUREBONE_OT_ToggleRiglinking)
     for cls in reversed(_classes):
         bpy.utils.unregister_class(cls)

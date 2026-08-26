@@ -10,6 +10,7 @@ ALL_MODULES = [
     {"name": "plotting", "op": "gesturebone.toggle_plotting", "icon": "ARMATURE_DATA"},
     {"name": "gesture",  "op": "gesturebone.toggle_gesture",  "icon": "GREASEPENCIL"},
     {"name": "riglinking", "op": "gesturebone.toggle_riglinking", "icon": "LINKED"},
+    {"name": "spritesheet", "op": "gesturebone.toggle_spritesheet", "icon": "IMGDISPLAY"},
 ]
 
 

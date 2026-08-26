@@ -1,5 +1,6 @@
 {
   "plotting": true,
   "gesture": true,
-  "riglinking": true
+  "riglinking": true,
+  "spritesheet": false
 }

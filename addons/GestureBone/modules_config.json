@@ -2,5 +2,6 @@
   "plotting": true,
   "gesture": true,
   "riglinking": true,
-  "spritesheet": false
+  "spritesheet": true,
+  "expression_sheet": true
 }

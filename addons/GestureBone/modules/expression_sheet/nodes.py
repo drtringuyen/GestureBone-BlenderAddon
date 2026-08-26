@@ -74,7 +74,7 @@ def build_shared_uv_tree():
     calib = iface.new_socket(name="Calibration", in_out='INPUT', socket_type='NodeSocketFloat')
     calib.default_value = 1.0
     calib.min_value = 0.0
-    calib.max_value = 2.0
+    calib.max_value = 10.0
 
     mrad = iface.new_socket(name="Mask Radius", in_out='INPUT', socket_type='NodeSocketFloat')
     mrad.default_value = 0.1
@@ -249,25 +249,24 @@ def _add_singleprop_driver_on_socket(container, node_name, socket_name,
 
 
 def _ensure_uv_map_feed(node):
-    """Auto-create/keep a small UV Map node wired into this instance's 'UV'
-    input, set to uv_map_name. Cheap standard node (not a group). Shared
-    behavior parity with the old node's internal UVMap. If the user has
-    wired their own UV source in, leave it alone."""
+    """Auto-create a small UV Map node wired into this instance's 'UV' input
+    when nothing is feeding it. Cheap standard node (not a group). The layer
+    is chosen on that UV Map node itself (empty = active UV), so there's no
+    mirror string on this node. If the 'UV' input is already fed -- by our
+    auto node or the user's own source -- leave it alone."""
     container = node.id_data
     uv_in = node.inputs.get("UV")
     if uv_in is None:
         return
-    # already fed by something the user (or we) wired? keep it, just sync map
+    # Already fed (auto node or user-wired)? Don't touch it.
     if uv_in.links:
-        src = uv_in.links[0].from_node
-        if src.bl_idname == 'ShaderNodeUVMap' and src.name.endswith(UVFB_UVMAP_SUFFIX):
-            src.uv_map = node.uv_map_name
         return
     uvmap = container.nodes.new('ShaderNodeUVMap')
     uvmap.name = node.name + UVFB_UVMAP_SUFFIX
     uvmap.label = "UV for " + node.name
     uvmap.location = (node.location.x - 220, node.location.y - 120)
-    uvmap.uv_map = node.uv_map_name
+    # Leave uvmap.uv_map = "" -> Blender uses the active UV layer. The user
+    # picks the layer on this UV Map node directly.
     container.links.new(uvmap.outputs['UV'], uv_in)
 
 
@@ -277,17 +276,15 @@ def refresh_uv_from_bone_shared(node):
 
     _ensure_uv_map_feed(node)
 
-    # Hide the driven/internal input sockets so the node stays tidy.
-    for hidden in ("Location", "Rotation", "Scale", "Mask Location", "Exp Index In"):
+    # Hide the driven/internal input sockets so the node stays tidy. Amount is
+    # fixed at 1.0 (full effect) and no longer exposed on the node.
+    for hidden in ("Amount", "Location", "Rotation", "Scale", "Mask Location", "Exp Index In"):
         s = node.inputs.get(hidden)
         if s is not None:
             s.hide = True
-    # Amount pinned to 1.0 and hidden value (dialed once).
     amt = node.inputs.get("Amount")
-    if amt is not None:
-        amt.hide_value = True
-        if amt.default_value != 1.0:
-            amt.default_value = 1.0
+    if amt is not None and amt.default_value != 1.0:
+        amt.default_value = 1.0
 
     _clear_instance_drivers(node)
 
@@ -422,9 +419,6 @@ class ShaderNodeCustomUVFromBoneShared(ShaderNodeCustomGroup):
     armature_obj: PointerProperty(name="Armature", type=bpy.types.Object,
                                   poll=is_armature, update=_on_update)
     bone_name: StringProperty(name="Bone", update=_on_update)
-    uv_map_name: StringProperty(name="UV Map",
-                                description="UV map for the auto-created UV feed",
-                                update=_on_update)
     index_prop_name: StringProperty(name="Index Property", default="exp_index",
                                     update=_on_update)
 
@@ -463,7 +457,6 @@ class ShaderNodeCustomUVFromBoneShared(ShaderNodeCustomGroup):
         else:
             row = layout.row(); row.enabled = False
             row.label(text="Select an Armature", icon='ERROR')
-        layout.prop(self, "uv_map_name", text="", icon='UV')
         layout.prop(self, "index_prop_name", text="", icon='RNA')
 
     def draw_label(self):

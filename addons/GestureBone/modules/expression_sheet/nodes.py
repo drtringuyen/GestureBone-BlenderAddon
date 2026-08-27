@@ -1,17 +1,26 @@
 """
-expression_sheet/nodes.py -- Expression Sheet shader nodes (Option B: shared).
+expression_sheet/nodes.py -- Expression Sheet shader nodes (shared group).
 
-Adds a 'UV From Bone (Shared)' Shader Editor node. Unlike the per-instance
-design, ALL instances reuse ONE internal node group (like a normal node
-group) -- creating/duplicating nodes adds no new groups. Per-bone values are
-driven on each node's own (hidden) input sockets instead of on Value nodes
-inside a private group, and the UV coordinate is fed via an auto-created
-per-instance UV Map node.
+Adds a 'UV From Bone (Shared)' Shader Editor node. ALL instances reuse ONE
+internal node group, so creating/duplicating nodes adds no new groups.
 
-Validated prototype (see the CHR_LittlePig_OptionB.blend copy). Not yet
-hardened: no old->shared migration and no reload-heal for renamed nodes --
-those are a follow-up pass. register()/unregister() are called by this
-module's __init__.py.
+SCHEMA v2 (packed): everything the bone contributes travels as ONE float4
+custom property on the mesh objects -- (loc.x, loc.y, rot.z, uniform scale) --
+plus a scalar exp index, read back by TWO ShaderNodeAttribute feeds instead of
+v1's five. Location / Rotation / Scale / Mask Location are reconstructed
+inside the shared group, where extra nodes cost nothing visually.
+
+  * 6 satellite nodes per instance -> 3, two of them collapsed
+  * 12 driver fcurves per mesh -> 5
+  * the float4 maps 1:1 onto an engine-side float4 if this is ever exported
+
+v1 files upgrade themselves in place on load (upgrade_shared_tree, preserving
+authored socket values AND the user's downstream links). Instances whose group
+is still v1 -- in practice ones living in a LINKED library saved by an older
+addon, which cannot be upgraded from here -- keep being driven in the v1 shape
+by _build_drivers_v1.
+
+register()/unregister() are called by this module's __init__.py.
 """
 
 import bpy
@@ -20,12 +29,18 @@ from bpy.props import PointerProperty, StringProperty, BoolProperty
 from bpy.app.handlers import persistent
 
 SHARED_GROUP_NAME = ".UVFromBoneShared"
+SHARED_GROUP_VERSION = 2
+VERSION_KEY = "gb_uvfb_version"          # custom prop stamped on the group
+NODE_ID = "ShaderNodeCustomUVFromBoneShared"
 UVFB_UVMAP_SUFFIX = "__UVForBone"   # auto-created UV Map node name suffix
 
 COMPONENTS = ("x", "y", "z")
 
-# Driven input sockets (name -> transform spec) built on the shared group and
-# driven per-instance on the node. Scale defaults to identity.
+# Authored per-instance socket values -- preserved across a schema upgrade.
+USER_SOCKETS = ("UV Island Center", "Calibration", "Mask Radius", "Mask Sharpness")
+
+# v1 driven input sockets (name -> transform spec). Still used to drive
+# instances stuck on a linked v1 group; see _build_drivers_v1.
 DRIVEN_VEC_INPUTS = {
     "Location": (("LOC_X", "LOC_Y", "LOC_Z"), "negate"),
     "Rotation": (("ROT_X", "ROT_Y", "ROT_Z"), "negate"),
@@ -41,36 +56,55 @@ def is_armature(self, obj):
 # Shared group: built once, reused by all instances.
 # ---------------------------------------------------------------------------
 
-def _mix_socket(node, name, socket_type, in_out='INPUT'):
-    sockets = node.inputs if in_out == 'INPUT' else node.outputs
-    for s in sockets:
-        if s.name == name and s.type == socket_type:
-            return s
-    raise KeyError((name, socket_type, in_out))
+def _can_edit(id_block):
+    """True when this datablock may be modified *and saved*.
+
+    Linked (library) data is still writable through RNA in memory, but the
+    change is never saved and silently diverges from the library -- so the
+    group upgrade must never touch it. Instances living in a linked tree keep
+    being driven in whatever format that library's own group expects; see
+    _build_drivers_v1.
+    """
+    return id_block is not None and getattr(id_block, "library", None) is None
 
 
-def build_shared_uv_tree():
-    """Build THE one shared UV-From-Bone group. Same internal math as the
-    per-instance design, but every driven value and the UV coordinate are
-    group INPUTS (driven / fed per instance) instead of internal Value/UVMap
-    nodes -- so a single group can serve every instance."""
-    tree = bpy.data.node_groups.new(SHARED_GROUP_NAME, 'ShaderNodeTree')
-    tree.use_fake_user = True   # shared singleton: keep even with 0 users
+def _tree_version(tree):
+    """Schema version of a shared group. Unstamped == the original v1 group."""
+    if tree is None:
+        return 0
+    try:
+        return int(tree[VERSION_KEY])
+    except Exception:
+        return 1
 
+
+def _populate_shared_uv_tree(tree):
+    """Fill an EMPTY ShaderNodeTree with the v2 UV-From-Bone graph.
+
+    v2 packs everything the bone contributes into ONE float4 -- Bone UV .xyz =
+    local (loc.x, loc.y, rot.z), Bone Scale = that float4's .w read off the
+    Attribute node's Alpha output -- plus a scalar Exp Index. That is two
+    ShaderNodeAttribute feeds per instance instead of v1's five, and 5 driver
+    fcurves per mesh instead of 12.
+
+    Location / Rotation / Scale / Mask Location are rebuilt in HERE, where
+    extra nodes cost nothing visually. Mask Location is the same bone's raw
+    local XY -- v1 drove it as its own vector purely because the invert flags
+    are baked into the driver expression; here 'Mask Sign' (a static,
+    never-driven socket the node writes from its own invert flags) undoes
+    them, so no second transport is needed.
+    """
     iface = tree.interface
 
-    uv_in = iface.new_socket(name="UV", in_out='INPUT', socket_type='NodeSocketVector')
+    iface.new_socket(name="UV", in_out='INPUT', socket_type='NodeSocketVector')
 
     piv = iface.new_socket(name="UV Island Center", in_out='INPUT', socket_type='NodeSocketVector')
     piv_id = piv.identifier
     piv.dimensions = 2
+    # Blender 5.2 invalidates the wrapper when dimensions changes -- re-fetch
+    # before touching default_value or it rejects the 2-item value.
     piv = iface.items_tree[piv_id]
     piv.default_value = (0.5, 0.5)
-
-    amt = iface.new_socket(name="Amount", in_out='INPUT', socket_type='NodeSocketFloat')
-    amt.default_value = 1.0
-    amt.min_value = 0.0
-    amt.max_value = 1.0
 
     calib = iface.new_socket(name="Calibration", in_out='INPUT', socket_type='NodeSocketFloat')
     calib.default_value = 1.0
@@ -87,24 +121,58 @@ def build_shared_uv_tree():
     msharp.min_value = 0.05
     msharp.max_value = 10.0
 
-    # Driven-per-instance inputs (hidden on the node; set by drivers).
-    loc_s = iface.new_socket(name="Location", in_out='INPUT', socket_type='NodeSocketVector')
-    rot_s = iface.new_socket(name="Rotation", in_out='INPUT', socket_type='NodeSocketVector')
-    scl_s = iface.new_socket(name="Scale", in_out='INPUT', socket_type='NodeSocketVector')
-    scl_s.default_value = (1.0, 1.0, 1.0)
-    mloc_s = iface.new_socket(name="Mask Location", in_out='INPUT', socket_type='NodeSocketVector')
-    exp_s = iface.new_socket(name="Exp Index In", in_out='INPUT', socket_type='NodeSocketFloat')
+    # --- driven / static per-instance inputs (hidden on the node) ---
+    iface.new_socket(name="Bone UV", in_out='INPUT', socket_type='NodeSocketVector')
+    bscale = iface.new_socket(name="Bone Scale", in_out='INPUT', socket_type='NodeSocketFloat')
+    bscale.default_value = 1.0
+    iface.new_socket(name="Exp Index In", in_out='INPUT', socket_type='NodeSocketFloat')
+    msign = iface.new_socket(name="Mask Sign", in_out='INPUT', socket_type='NodeSocketVector')
+    msign.default_value = (1.0, 1.0, 1.0)
 
     iface.new_socket(name="UV", in_out='OUTPUT', socket_type='NodeSocketVector')
     iface.new_socket(name="Mask", in_out='OUTPUT', socket_type='NodeSocketFloat')
     iface.new_socket(name="Exp Index", in_out='OUTPUT', socket_type='NodeSocketFloat')
 
     gin = tree.nodes.new('NodeGroupInput')
-    gin.location = (-900, 0)
+    gin.location = (-1200, 0)
     gout = tree.nodes.new('NodeGroupOutput')
     gout.location = (1100, 0)
 
-    # --- UV shift chain ---
+    # --- unpack the float4 back into the v1 vectors ---
+    sep = tree.nodes.new('ShaderNodeSeparateXYZ')
+    sep.label = "Unpack Bone float4"
+    sep.location = (-950, -150)
+    tree.links.new(gin.outputs['Bone UV'], sep.inputs['Vector'])
+
+    loc_vec = tree.nodes.new('ShaderNodeCombineXYZ')
+    loc_vec.label = "Location"
+    loc_vec.location = (-750, -60)
+    loc_vec.inputs['Z'].default_value = 0.0
+    tree.links.new(sep.outputs['X'], loc_vec.inputs['X'])
+    tree.links.new(sep.outputs['Y'], loc_vec.inputs['Y'])
+
+    rot_vec = tree.nodes.new('ShaderNodeCombineXYZ')
+    rot_vec.label = "Rotation"
+    rot_vec.location = (-750, -240)
+    rot_vec.inputs['X'].default_value = 0.0
+    rot_vec.inputs['Y'].default_value = 0.0
+    tree.links.new(sep.outputs['Z'], rot_vec.inputs['Z'])
+
+    scl_vec = tree.nodes.new('ShaderNodeCombineXYZ')
+    scl_vec.label = "Scale (uniform)"
+    scl_vec.location = (-750, -420)
+    scl_vec.inputs['Z'].default_value = 1.0
+    tree.links.new(gin.outputs['Bone Scale'], scl_vec.inputs['X'])
+    tree.links.new(gin.outputs['Bone Scale'], scl_vec.inputs['Y'])
+
+    mask_loc = tree.nodes.new('ShaderNodeVectorMath')
+    mask_loc.operation = 'MULTIPLY'
+    mask_loc.label = "Mask Location (un-inverted)"
+    mask_loc.location = (-500, -600)
+    tree.links.new(loc_vec.outputs['Vector'], mask_loc.inputs[0])
+    tree.links.new(gin.outputs['Mask Sign'], mask_loc.inputs[1])
+
+    # --- UV shift chain (identical math to v1) ---
     sub_pivot = tree.nodes.new('ShaderNodeVectorMath')
     sub_pivot.operation = 'SUBTRACT'
     sub_pivot.location = (-200, 200)
@@ -115,37 +183,32 @@ def build_shared_uv_tree():
     loc_scaled.operation = 'SCALE'
     loc_scaled.label = "Location * Calibration"
     loc_scaled.location = (-200, -100)
-    tree.links.new(gin.outputs['Location'], loc_scaled.inputs[0])
+    tree.links.new(loc_vec.outputs['Vector'], loc_scaled.inputs[0])
     tree.links.new(gin.outputs['Calibration'], loc_scaled.inputs['Scale'])
 
     mapping = tree.nodes.new('ShaderNodeMapping')
     mapping.location = (200, 200)
     tree.links.new(sub_pivot.outputs[0], mapping.inputs['Vector'])
     tree.links.new(loc_scaled.outputs[0], mapping.inputs['Location'])
-    tree.links.new(gin.outputs['Rotation'], mapping.inputs['Rotation'])
-    tree.links.new(gin.outputs['Scale'], mapping.inputs['Scale'])
+    tree.links.new(rot_vec.outputs['Vector'], mapping.inputs['Rotation'])
+    tree.links.new(scl_vec.outputs['Vector'], mapping.inputs['Scale'])
 
     add_pivot = tree.nodes.new('ShaderNodeVectorMath')
     add_pivot.operation = 'ADD'
     add_pivot.location = (450, 200)
-    tree.links.new(mapping.outputs['Vector'], add_pivot.inputs[0])
+    tree.links.new(mapping.outputs[0], add_pivot.inputs[0])
     tree.links.new(gin.outputs['UV Island Center'], add_pivot.inputs[1])
+    # v1 ended in a Mix(factor=Amount) between the untouched UV and this.
+    # Amount was pinned to 1.0 and hidden, which makes that Mix an identity
+    # pass-through of B -- dropped here, along with the socket.
+    tree.links.new(add_pivot.outputs[0], gout.inputs['UV'])
 
-    mix = tree.nodes.new('ShaderNodeMix')
-    mix.data_type = 'VECTOR'
-    mix.factor_mode = 'UNIFORM'
-    mix.location = (700, 100)
-    tree.links.new(gin.outputs['Amount'], _mix_socket(mix, "Factor", 'VALUE'))
-    tree.links.new(gin.outputs['UV'], _mix_socket(mix, "A", 'VECTOR'))
-    tree.links.new(add_pivot.outputs[0], _mix_socket(mix, "B", 'VECTOR'))
-    tree.links.new(_mix_socket(mix, "Result", 'VECTOR', 'OUTPUT'), gout.inputs['UV'])
-
-    # --- Mask chain ---
+    # --- Mask chain (identical math to v1) ---
     mloc_scaled = tree.nodes.new('ShaderNodeVectorMath')
     mloc_scaled.operation = 'SCALE'
     mloc_scaled.label = "Mask Location * Calibration"
     mloc_scaled.location = (-200, -400)
-    tree.links.new(gin.outputs['Mask Location'], mloc_scaled.inputs[0])
+    tree.links.new(mask_loc.outputs[0], mloc_scaled.inputs[0])
     tree.links.new(gin.outputs['Calibration'], mloc_scaled.inputs['Scale'])
 
     bone_uv_pos = tree.nodes.new('ShaderNodeVectorMath')
@@ -184,14 +247,166 @@ def build_shared_uv_tree():
     # --- Exp Index passthrough ---
     tree.links.new(gin.outputs['Exp Index In'], gout.inputs['Exp Index'])
 
+    tree[VERSION_KEY] = SHARED_GROUP_VERSION
     return tree
 
 
+def build_shared_uv_tree():
+    """Build THE one shared UV-From-Bone group (current schema)."""
+    tree = bpy.data.node_groups.new(SHARED_GROUP_NAME, 'ShaderNodeTree')
+    tree.use_fake_user = True   # shared singleton: keep even with 0 users
+    return _populate_shared_uv_tree(tree)
+
+
+def _is_managed_attr_feed(node_name, owner_name):
+    """Our own auto-created Attribute feeds -- rebuilt from scratch, so links
+    from them must NOT be restored after a group rebuild."""
+    return any(node_name == owner_name + s for s in ALL_ATTR_SUFFIXES)
+
+
+def _snapshot_instances(tree):
+    """Record everything a group rebuild would destroy, before it happens.
+
+    Removing an interface socket removes the matching socket on every node
+    instance -- taking its default_value AND every link attached to it. That
+    means an unguarded rebuild would silently (a) reset authored values like
+    UV Island Center / Calibration / Mask Radius / Mask Sharpness and (b) tear
+    out the user's own downstream wiring from UV / Mask / Exp Index. Both are
+    real data in every existing file, so both are snapshotted here and put
+    back by _restore_instances.
+
+    Keyed by NAME throughout, never by pointer (a tree mutation invalidates
+    every node pointer held in a stale list). Link endpoints on OTHER nodes
+    are recorded by socket INDEX, because names there are not unique -- a Math
+    node has two inputs both called 'Value'.
+    """
+    saved = []
+    for c in _iter_shared_containers():
+        if not _can_edit(c):
+            continue
+        for name in [n.name for n in c.nodes if n.bl_idname == NODE_ID]:
+            nd = c.nodes.get(name)
+            if nd is None or nd.node_tree != tree:
+                continue
+            vals = {}
+            for sname in USER_SOCKETS:
+                s = nd.inputs.get(sname)
+                if s is None:
+                    continue
+                try:
+                    v = s.default_value
+                    vals[sname] = list(v) if hasattr(v, "__len__") else float(v)
+                except Exception:
+                    pass
+            in_links = []
+            for s in nd.inputs:
+                for l in s.links:
+                    src = l.from_node
+                    if _is_managed_attr_feed(src.name, name):
+                        continue
+                    try:
+                        idx = list(src.outputs).index(l.from_socket)
+                    except ValueError:
+                        continue
+                    in_links.append((s.name, src.name, idx))
+            out_links = []
+            for s in nd.outputs:
+                for l in s.links:
+                    dst = l.to_node
+                    try:
+                        idx = list(dst.inputs).index(l.to_socket)
+                    except ValueError:
+                        continue
+                    out_links.append((s.name, dst.name, idx))
+            saved.append((c.name, name, vals, in_links, out_links))
+    return saved
+
+
+def _restore_instances(saved):
+    by_container = {}
+    for cname, nname, vals, in_links, out_links in saved:
+        by_container.setdefault(cname, []).append((nname, vals, in_links, out_links))
+    for c in _iter_shared_containers():
+        for nname, vals, in_links, out_links in by_container.get(c.name, ()):
+            nd = c.nodes.get(nname)
+            if nd is None:
+                continue
+            for sname, v in vals.items():
+                s = nd.inputs.get(sname)
+                if s is None:
+                    continue
+                try:
+                    if hasattr(s.default_value, "__len__"):
+                        n = len(s.default_value)
+                        s.default_value = tuple(v)[:n] if hasattr(v, "__len__") else (v,) * n
+                    else:
+                        s.default_value = v[0] if hasattr(v, "__len__") else v
+                except Exception as e:
+                    print("Expression Sheet: could not restore value", cname, nname, sname, e)
+            for sname, src_name, idx in in_links:
+                dst_sock = nd.inputs.get(sname)
+                src = c.nodes.get(src_name)
+                if dst_sock is None or src is None or idx >= len(src.outputs):
+                    continue
+                try:
+                    c.links.new(src.outputs[idx], dst_sock)
+                except Exception as e:
+                    print("Expression Sheet: could not restore in-link", cname, nname, sname, e)
+            for sname, dst_name, idx in out_links:
+                src_sock = nd.outputs.get(sname)
+                dst = c.nodes.get(dst_name)
+                if src_sock is None or dst is None or idx >= len(dst.inputs):
+                    continue
+                try:
+                    c.links.new(src_sock, dst.inputs[idx])
+                except Exception as e:
+                    print("Expression Sheet: could not restore out-link", cname, nname, sname, e)
+
+
+def upgrade_shared_tree(tree):
+    """Rebuild an old shared group in place at the current schema.
+
+    In place, on the SAME datablock, so no instance has to be re-pointed and
+    no old tree has to be deleted -- a custom-group node's user count is not a
+    reliable basis for deletion, so avoiding the deletion avoids the problem.
+
+    Refuses to touch a LINKED group: it belongs to a library that may still be
+    running the old addon, and writing to it would diverge in memory without
+    ever being saved. Instances in linked trees stay on the v1 transport.
+    """
+    if tree is None or _tree_version(tree) >= SHARED_GROUP_VERSION:
+        return False
+    if not _can_edit(tree):
+        return False
+    saved = _snapshot_instances(tree)
+    tree.nodes.clear()
+    for item in list(tree.interface.items_tree):
+        try:
+            tree.interface.remove(item)
+        except Exception:
+            pass
+    _populate_shared_uv_tree(tree)
+    tree.use_fake_user = True
+    _restore_instances(saved)
+    print("GestureBone/ExpressionSheet: upgraded {} to v{} ({} instance(s) preserved)".format(
+        tree.name, SHARED_GROUP_VERSION, len(saved)))
+    return True
+
+
 def get_shared_uv_tree():
-    """Return the one shared group, building it if it doesn't exist yet."""
-    t = bpy.data.node_groups.get(SHARED_GROUP_NAME)
+    """Return the one LOCAL shared group, building or upgrading as needed.
+
+    Explicitly prefers a local datablock: a linked character drags its own
+    '.UVFromBoneShared' in, and new nodes must never be pointed at that.
+    """
+    t = None
+    for g in bpy.data.node_groups:
+        if g.name == SHARED_GROUP_NAME and g.library is None:
+            t = g
+            break
     if t is None:
-        t = build_shared_uv_tree()
+        return build_shared_uv_tree()
+    upgrade_shared_tree(t)
     return t
 
 
@@ -216,6 +431,8 @@ def _clear_legacy_socket_drivers(node):
     """Remove old-style drivers directly on this node's own input sockets
     (pre-fix Design B files). Safe/cheap no-op once migrated."""
     container = node.id_data
+    if not _can_edit(container):
+        return
     name = node.name
     for socket_name in ("Location", "Rotation", "Scale", "Mask Location"):
         for i in range(3):
@@ -363,17 +580,60 @@ def _add_singleprop_driver_on_prop(obj, key, armature, data_path, expression="pr
     tgt.data_path = data_path
 
 
-# Auto-created ShaderNodeAttribute feeds, one per driven socket, named off
-# the owner node (like the existing UV Map feed) so they can be found again
-# and swept up as orphans.
-ATTR_SUFFIX = {
+def _add_uniform_scale_driver(obj, key, comp_index, armature, bone, invert):
+    """Uniform scale = the mean of the bone's local X and Y scale.
+
+    One fcurve with two TRANSFORMS variables. Under a genuine uniform scale
+    sx == sy so the mean is exact; if someone scales a single axis it still
+    degrades to something sensible instead of ignoring that axis outright.
+    """
+    path = '["{}"]'.format(key)
+    obj.driver_remove(path, comp_index)
+    fcurve = obj.driver_add(path, comp_index)
+    drv = fcurve.driver
+    drv.type = 'SCRIPTED'
+    drv.expression = "2-(sx+sy)/2" if invert else "(sx+sy)/2"
+    for vname, ttype in (("sx", 'SCALE_X'), ("sy", 'SCALE_Y')):
+        var = drv.variables.new()
+        var.name = vname
+        var.type = 'TRANSFORMS'
+        tgt = var.targets[0]
+        tgt.id = armature
+        tgt.bone_target = bone
+        tgt.transform_type = ttype
+        tgt.transform_space = 'LOCAL_SPACE'
+        tgt.rotation_mode = 'AUTO'
+
+
+# ---------------------------------------------------------------------------
+# Auto-created ShaderNodeAttribute feeds.
+#
+# v2 needs TWO of them per instance: one carrying the packed float4 (Vector =
+# xyz, Alpha = w -- both verified to survive an OBJECT custom property in
+# Cycles and EEVEE on 5.2) and one carrying the scalar Exp Index. v1 needed
+# five, one per driven socket; those names are still listed so old feed nodes
+# get swept out of migrated files and so instances stuck on a LINKED v1 group
+# keep working.
+#
+# NOTE .Fac is the MEAN of xyz, not .x -- it is only ever correct on a scalar
+# property, which is how Exp Index uses it. Never point Fac at a packed prop.
+# ---------------------------------------------------------------------------
+
+PACK_SOCKET = "BoneUV"          # custom-property suffix for the packed float4
+EXP_SOCKET = "ExpIndex"         # custom-property suffix for the scalar index
+
+PACK_ATTR_SUFFIX = "__ATTR_BoneUV"
+EXP_ATTR_SUFFIX = "__ATTR_ExpIndex"
+
+# v1 (legacy) feeds -- kept for the linked-library path and for cleanup.
+LEGACY_ATTR_SUFFIX = {
     "Location": "__ATTR_Location",
     "Rotation": "__ATTR_Rotation",
     "Scale": "__ATTR_Scale",
     "Mask Location": "__ATTR_MaskLoc",
     "Exp Index In": "__ATTR_ExpIndex",
 }
-ATTR_OUTPUT = {
+LEGACY_ATTR_OUTPUT = {
     "Location": "Vector",
     "Rotation": "Vector",
     "Scale": "Vector",
@@ -381,10 +641,20 @@ ATTR_OUTPUT = {
     "Exp Index In": "Fac",
 }
 
+ALL_ATTR_SUFFIXES = tuple(sorted(
+    set(LEGACY_ATTR_SUFFIX.values()) | {PACK_ATTR_SUFFIX, EXP_ATTR_SUFFIX}))
+
+# Every socket the node drives or sets itself, across BOTH schemas -- hidden
+# on the node so the instance stays tidy.
+HIDDEN_SOCKETS = ("Amount", "Location", "Rotation", "Scale", "Mask Location",
+                  "Exp Index In", "Bone UV", "Bone Scale", "Mask Sign")
+
 
 def _remove_attr_feeds(node):
     container = node.id_data
-    for suffix in ATTR_SUFFIX.values():
+    if not _can_edit(container):
+        return
+    for suffix in ALL_ATTR_SUFFIXES:
         attr = container.nodes.get(node.name + suffix)
         if attr is not None:
             try:
@@ -393,9 +663,17 @@ def _remove_attr_feeds(node):
                 pass
 
 
-def _ensure_attr_feed(node, socket_name, prop_key, y_offset):
+def _ensure_attr_feed(node, suffix, prop_key, wiring, y_offset, collapse=True):
+    """Create/repoint one Attribute feed and wire its outputs into the node.
+
+    *wiring* is a sequence of (attribute output name, node input socket name),
+    so one Attribute node can serve several sockets -- v2 takes Vector and
+    Alpha off the same node to move a whole float4 over two links.
+    """
     container = node.id_data
-    attr_name = node.name + ATTR_SUFFIX[socket_name]
+    if not _can_edit(container):
+        return
+    attr_name = node.name + suffix
     attr = container.nodes.get(attr_name)
     if attr is None or attr.bl_idname != 'ShaderNodeAttribute':
         if attr is not None:
@@ -405,74 +683,120 @@ def _ensure_attr_feed(node, socket_name, prop_key, y_offset):
                 pass
         attr = container.nodes.new('ShaderNodeAttribute')
         attr.name = attr_name
-    attr.label = "{} for {}".format(socket_name, node.name)
-    attr.location = (node.location.x - 220, node.location.y + y_offset)
+    attr.label = "{} for {}".format(prop_key.rsplit("::", 1)[-1], node.name)
+    attr.location = (node.location.x - 240, node.location.y + y_offset)
     attr.attribute_type = 'OBJECT'
     attr.attribute_name = prop_key
-
-    sock = node.inputs.get(socket_name)
-    if sock is None:
-        return
-    out_socket = attr.outputs[ATTR_OUTPUT[socket_name]]
-    fed = sock.links and sock.links[0].from_socket == out_socket
-    if not fed:
+    # Collapsed: the node shows nothing but a machine-generated property name,
+    # so it draws as a small pill instead of a full box.
+    attr.hide = collapse
+    for out_name, socket_name in wiring:
+        sock = node.inputs.get(socket_name)
+        if sock is None:
+            continue
+        out_socket = attr.outputs.get(out_name)
+        if out_socket is None:
+            continue
+        if sock.links and sock.links[0].from_socket == out_socket:
+            continue
         container.links.new(out_socket, sock)
 
 
 def _ensure_uv_map_feed(node):
-    """Auto-create a small UV Map node wired into this instance's 'UV' input
-    when nothing is feeding it. Cheap standard node (not a group). The layer
-    is chosen on that UV Map node itself (empty = active UV), so there's no
-    mirror string on this node. If the 'UV' input is already fed -- by our
-    auto node or the user's own source -- leave it alone."""
+    """Auto-create a UV Map node feeding this instance's 'UV' input when
+    nothing feeds it. The layer is chosen on that UV Map node itself (empty =
+    active UV), so there's no mirror string on this node.
+
+    Re-uses an existing node of the expected name rather than making a second
+    one: a group-schema upgrade drops the link (the socket is recreated), and
+    blindly calling nodes.new() there would strand the user's chosen UV layer
+    on an orphan named '...__UVForBone.001'.
+    """
     container = node.id_data
+    if not _can_edit(container):
+        return
     uv_in = node.inputs.get("UV")
-    if uv_in is None:
+    if uv_in is None or uv_in.links:
         return
-    # Already fed (auto node or user-wired)? Don't touch it.
-    if uv_in.links:
-        return
-    uvmap = container.nodes.new('ShaderNodeUVMap')
-    uvmap.name = node.name + UVFB_UVMAP_SUFFIX
-    uvmap.label = "UV for " + node.name
-    uvmap.location = (node.location.x - 220, node.location.y - 120)
-    # Leave uvmap.uv_map = "" -> Blender uses the active UV layer. The user
-    # picks the layer on this UV Map node directly.
+    name = node.name + UVFB_UVMAP_SUFFIX
+    uvmap = container.nodes.get(name)
+    if uvmap is None or uvmap.bl_idname != 'ShaderNodeUVMap':
+        uvmap = container.nodes.new('ShaderNodeUVMap')
+        uvmap.name = name
+        uvmap.label = "UV for " + node.name
+        uvmap.location = (node.location.x - 240, node.location.y - 200)
+        # Leave uvmap.uv_map = "" -> Blender uses the active UV layer.
     container.links.new(uvmap.outputs['UV'], uv_in)
 
 
-def refresh_uv_from_bone_shared(node):
-    if node.node_tree is None:
-        node.node_tree = get_shared_uv_tree()
+def _exp_index_datapath(node, armature, bone, targets):
+    """('pose.bones[..][..]', True) when the bone actually carries the index
+    property, else (None, False). Checks the armature the drivers will really
+    sample -- the override, when the rig is linked."""
+    prop_name = (node.index_prop_name or "exp_index").strip()
+    if not prop_name:
+        return None, False
+    check_arm = _resolve_driver_armature(armature, targets[0])
+    pbone = check_arm.pose.bones.get(bone) or armature.pose.bones.get(bone)
+    if pbone is None or prop_name not in pbone.keys():
+        return None, False
+    return 'pose.bones["{}"]["{}"]'.format(bone, prop_name), True
 
-    _ensure_uv_map_feed(node)
 
-    # Hide the driven/internal input sockets so the node stays tidy. Amount is
-    # fixed at 1.0 (full effect) and no longer exposed on the node.
-    for hidden in ("Amount", "Location", "Rotation", "Scale", "Mask Location", "Exp Index In"):
-        s = node.inputs.get(hidden)
-        if s is not None:
-            s.hide = True
-    amt = node.inputs.get("Amount")
-    if amt is not None and amt.default_value != 1.0:
-        amt.default_value = 1.0
+def _build_drivers_v2(node, targets, armature, bone):
+    """Current transport: one float4 + one scalar, two Attribute feeds.
 
-    _clear_legacy_socket_drivers(node)
-    _clear_instance_props_and_drivers(node)
-    _remove_attr_feeds(node)
-
-    armature = node.armature_obj
-    bone = node.bone_name
-    valid = bool(armature and armature.type == 'ARMATURE'
-                 and bone and bone in armature.data.bones)
-    if not valid:
-        return
-
+    float4 layout, chosen so it maps 1:1 onto an engine-side float4 later:
+        x = local loc X   y = local loc Y   z = local rot Z   w = uniform scale
+    """
     container = node.id_data
-    targets = _target_objects(node)
-    if not targets:
-        return  # no mesh uses this material (yet) -- nothing to drive
+    key = _prop_key(container, node, PACK_SOCKET)
+    specs = (
+        (0, 'LOC_X', "-bone" if node.invert_location_x else "bone"),
+        (1, 'LOC_Y', "-bone" if node.invert_location_y else "bone"),
+        (2, 'ROT_Z', "-bone" if node.invert_rotation else "bone"),
+    )
+    for obj in targets:
+        _ensure_prop(obj, key, 4)
+        drv_arm = _resolve_driver_armature(armature, obj)
+        for idx, ttype, expr in specs:
+            _add_transform_driver_on_prop(obj, key, idx, drv_arm, bone, ttype,
+                                          'LOCAL_SPACE', expr)
+        _add_uniform_scale_driver(obj, key, 3, drv_arm, bone, node.invert_scale_x)
+    _ensure_attr_feed(node, PACK_ATTR_SUFFIX, key,
+                      (("Vector", "Bone UV"), ("Alpha", "Bone Scale")), -60)
 
+    # Static, never driven: undoes the location inversion for the mask branch,
+    # which wants the bone's RAW local XY. A plain default_value write -- it
+    # must never become a driver on the node tree (see the note above).
+    sign = node.inputs.get("Mask Sign")
+    if sign is not None:
+        sign.default_value = (-1.0 if node.invert_location_x else 1.0,
+                              -1.0 if node.invert_location_y else 1.0,
+                              1.0)
+
+    data_path, ok = _exp_index_datapath(node, armature, bone, targets)
+    if ok:
+        exp_key = _prop_key(container, node, EXP_SOCKET)
+        for obj in targets:
+            _ensure_prop(obj, exp_key, None)
+            _add_singleprop_driver_on_prop(obj, exp_key,
+                                           _resolve_driver_armature(armature, obj),
+                                           data_path)
+        _ensure_attr_feed(node, EXP_ATTR_SUFFIX, exp_key,
+                          (("Fac", "Exp Index In"),), -110)
+
+
+def _build_drivers_v1(node, targets, armature, bone):
+    """Legacy transport: five props, five Attribute feeds, 12 fcurves/mesh.
+
+    Reached only by an instance whose group is still v1 -- in practice one
+    that lives in a LINKED library saved by an older addon. That library's own
+    Attribute nodes read these exact property names, so a local file has to
+    keep feeding them in the old shape or the linked character freezes. Local
+    groups are upgraded by upgrade_shared_tree() and never come through here.
+    """
+    container = node.id_data
     invert = {
         "Location": (node.invert_location_x, node.invert_location_y, False),
         "Rotation": (node.invert_rotation, node.invert_rotation, node.invert_rotation),
@@ -492,10 +816,11 @@ def refresh_uv_from_bone_shared(node):
                     expr = "bone"
                 _add_transform_driver_on_prop(obj, key, i, drv_arm, bone, ttype,
                                               'LOCAL_SPACE', expr)
-        _ensure_attr_feed(node, socket_name, key, y_off)
+        _ensure_attr_feed(node, LEGACY_ATTR_SUFFIX[socket_name], key,
+                          ((LEGACY_ATTR_OUTPUT[socket_name], socket_name),),
+                          y_off, collapse=False)
         y_off -= 80
 
-    # Mask Location: local-space, non-inverted, X/Y only (Z stays 0).
     mask_key = _prop_key(container, node, "Mask Location")
     for obj in targets:
         _ensure_prop(obj, mask_key, 3)
@@ -503,24 +828,61 @@ def refresh_uv_from_bone_shared(node):
         for i, ttype in enumerate(("LOC_X", "LOC_Y")):
             _add_transform_driver_on_prop(obj, mask_key, i, drv_arm, bone, ttype,
                                           'LOCAL_SPACE', "bone")
-    _ensure_attr_feed(node, "Mask Location", mask_key, y_off)
+    _ensure_attr_feed(node, LEGACY_ATTR_SUFFIX["Mask Location"], mask_key,
+                      ((LEGACY_ATTR_OUTPUT["Mask Location"], "Mask Location"),),
+                      y_off, collapse=False)
     y_off -= 80
 
-    # Exp Index: custom property on the pose bone, if present. Check the
-    # armature the drivers will actually sample (the override, when linked) --
-    # that's where the animator's keyed exp_index lives.
-    prop_name = (node.index_prop_name or "exp_index").strip()
-    check_arm = _resolve_driver_armature(armature, targets[0])
-    pbone = check_arm.pose.bones.get(bone) or armature.pose.bones.get(bone)
-    if prop_name and pbone is not None and prop_name in pbone.keys():
+    data_path, ok = _exp_index_datapath(node, armature, bone, targets)
+    if ok:
         exp_key = _prop_key(container, node, "Exp Index In")
-        data_path = 'pose.bones["{}"]["{}"]'.format(bone, prop_name)
         for obj in targets:
             _ensure_prop(obj, exp_key, None)
             _add_singleprop_driver_on_prop(obj, exp_key,
                                            _resolve_driver_armature(armature, obj),
                                            data_path)
-        _ensure_attr_feed(node, "Exp Index In", exp_key, y_off)
+        _ensure_attr_feed(node, LEGACY_ATTR_SUFFIX["Exp Index In"], exp_key,
+                          ((LEGACY_ATTR_OUTPUT["Exp Index In"], "Exp Index In"),),
+                          y_off, collapse=False)
+
+
+def refresh_uv_from_bone_shared(node):
+    if node.node_tree is None:
+        node.node_tree = get_shared_uv_tree()
+
+    version = _tree_version(node.node_tree)
+
+    _ensure_uv_map_feed(node)
+
+    # Hide the driven/internal input sockets so the node stays tidy. Amount
+    # only exists on v1 and was always pinned to full effect.
+    for hidden in HIDDEN_SOCKETS:
+        s = node.inputs.get(hidden)
+        if s is not None:
+            s.hide = True
+    amt = node.inputs.get("Amount")
+    if amt is not None and amt.default_value != 1.0:
+        amt.default_value = 1.0
+
+    _clear_legacy_socket_drivers(node)
+    _clear_instance_props_and_drivers(node)
+    _remove_attr_feeds(node)
+
+    armature = node.armature_obj
+    bone = node.bone_name
+    valid = bool(armature and armature.type == 'ARMATURE'
+                 and bone and bone in armature.data.bones)
+    if not valid:
+        return
+
+    targets = _target_objects(node)
+    if not targets:
+        return  # no mesh uses this material (yet) -- nothing to drive
+
+    if version >= 2:
+        _build_drivers_v2(node, targets, armature, bone)
+    else:
+        _build_drivers_v1(node, targets, armature, bone)
 
 
 def _on_update(self, context):
@@ -595,6 +957,10 @@ def _process_pending():
         #    and drivers pointing at nodes that no longer exist. Decide first,
         #    remove after: removing mid-iteration invalidates the remaining
         #    pointers in the snapshot (see migrate_legacy_drivers below).
+        # Never restructure a linked tree: writes there are memory-only,
+        # are never saved, and just churn the library's own graph.
+        if not _can_edit(c):
+            continue
         orphan_names = []
         for f in c.nodes:
             if (f.bl_idname == 'ShaderNodeUVMap' and f.name.endswith(UVFB_UVMAP_SUFFIX)
@@ -604,7 +970,7 @@ def _process_pending():
                 orphan_names.append(f.name)
                 continue
             if f.bl_idname == 'ShaderNodeAttribute':
-                for suffix in ATTR_SUFFIX.values():
+                for suffix in ALL_ATTR_SUFFIXES:
                     if f.name.endswith(suffix):
                         if c.nodes.get(f.name[:-len(suffix)]) is None:
                             orphan_names.append(f.name)
@@ -618,7 +984,8 @@ def _process_pending():
             except Exception:
                 pass
         if c.animation_data:
-            our_sockets = ("Location", "Rotation", "Scale", "Mask Location", "Exp Index In")
+            our_sockets = ("Location", "Rotation", "Scale", "Mask Location",
+                           "Exp Index In", "Bone UV", "Bone Scale", "Mask Sign")
             for fc in list(c.animation_data.drivers):
                 dp = fc.data_path
                 if not (dp.startswith('nodes["') and '.inputs["' in dp):
@@ -640,7 +1007,7 @@ class ShaderNodeCustomUVFromBoneShared(ShaderNodeCustomGroup):
     """Option B: shifts/rotates/scales a UV from a bone's local pose, using
     ONE shared internal group across all instances. Per-bone values are
     driven on this node's own (hidden) input sockets."""
-    bl_idname = "ShaderNodeCustomUVFromBoneShared"
+    bl_idname = NODE_ID
     bl_label = "UV From Bone (Shared)"
     bl_icon = 'UV'
 
@@ -717,6 +1084,18 @@ def migrate_legacy_drivers():
     drivers. Called eagerly from a load_post handler below so every file is
     always safe before the user gets a chance to hit Make Library Override.
     """
+    # Upgrade the shared group ONCE, before any instance is refreshed --
+    # the rebuild snapshots and restores every instance's authored values and
+    # links, so it must not run interleaved with per-instance work. Only a
+    # LOCAL group is touched; a linked one belongs to its library.
+    for g in bpy.data.node_groups:
+        if g.name == SHARED_GROUP_NAME and g.library is None:
+            try:
+                upgrade_shared_tree(g)
+            except Exception as e:
+                print("Expression Sheet: shared-group upgrade failed:", e)
+            break
+
     n = 0
     for c in _iter_shared_containers():
         # Snapshot NAMES, never node pointers. refresh_uv_from_bone_shared()

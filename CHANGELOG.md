@@ -28,6 +28,55 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the current design.
   row; plotting shows a "Registration" box and a wide Auto Rig + icon cluster.
   Presentation-only; verified to draw on both Blender 5.1 and 5.2.
 
+### Changed (Aug 2026)
+- **Expression Sheet: UV From Bone (Shared) node graph packed into a float4.**
+  Each instance used to need six satellite nodes (five `ShaderNodeAttribute`
+  feeds, one per driven socket, plus a UV Map node) and 12 driver fcurves on
+  every mesh using the material. Everything the bone contributes now travels
+  as ONE float4 object custom property — `(loc.x, loc.y, rot.z, uniform
+  scale)`, read back off a single Attribute node's `Vector` + `Alpha` outputs
+  — plus a scalar exp index. `Location` / `Rotation` / `Scale` / `Mask
+  Location` are reconstructed *inside* the shared group, where extra nodes
+  cost nothing visually; `Mask Location` needs no transport at all, since it
+  is the same bone's raw local XY recovered via a static (never driven)
+  `Mask Sign` socket. The two Attribute feeds are collapsed, so they draw as
+  pills rather than boxes.
+  - Per instance: 6 satellite nodes → 3 (two collapsed); node face loses 3
+    socket rows (`Amount` is gone — it was pinned to 1.0 and hidden, making
+    its `Mix` an identity pass-through).
+  - `CHR_LittlePig`: **780 → 325** object drivers, 30 → 15 feed nodes, 25 →
+    10 custom properties, 5 → 2 attribute lookups per shading sample.
+  - The float4 layout is deliberate: it maps 1:1 onto an engine-side `float4`
+    if this rig is ever exported. (Drivers and object custom properties do not
+    themselves survive FBX/glTF — this only makes the data model the right
+    shape.)
+  - **Behaviour change**: rotation X/Y, location Z and non-uniform scale are
+    no longer driven. Only rotation Z, location XY and a uniform scale (the
+    mean of the bone's local X and Y scale) affect a 2D UV. Verified
+    pixel-identical to the old graph for everything inside that domain.
+  - **Verified** on Blender 5.1 and 5.2: a synthetic probe renders the node's
+    UV and Mask outputs across a fixed pose sweep, and old-vs-new EXRs match
+    to 1e-6 (5.1-on-new vs 5.2-on-old included). On a copy of the real
+    character file the migration preserves every authored socket value, every
+    UV Map layer choice and all downstream wiring, and is idempotent. Fresh
+    link + `make_override_library()` completes in 0.02s (27 overrides, no
+    hang) with every driver retargeted to the local override armature, and
+    posing the override bone moves the driven value.
+
+- **Shared group is versioned** (`gb_uvfb_version` custom property).
+  `upgrade_shared_tree()` rebuilds an old group **in place on the same
+  datablock**, so no instance has to be re-pointed and no old tree has to be
+  deleted (a custom-group node's user count is not a reliable basis for
+  deletion). Because rebuilding the interface destroys every instance's socket
+  values *and links*, the upgrade snapshots and restores authored values,
+  incoming links and downstream links first — keyed by name, with endpoints on
+  other nodes recorded by socket index since names there are not unique.
+  A **linked** group is never touched: it belongs to a library that may still
+  be running the old addon, so instances referencing it keep being driven in
+  the v1 five-property shape by `_build_drivers_v1`. Verified by linking the
+  untouched v1 production file into a fresh file under the new addon: it stays
+  on v1 (780 drivers, legacy property names) and still animates correctly.
+
 ### Fixed (Aug 2026)
 - **Expression Sheet (shared) hung Blender on Library Override**: a material
   node-tree driver targeting the gesture armature (the per-instance UV shift

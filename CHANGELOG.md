@@ -128,6 +128,40 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the current design.
     5 existing node instances.
 
 ### Fixed (Aug 2026)
+- **Auto Rig broke on Blender 5.2 (GN modifier inputs moved off ID-properties)**:
+  5.2 stopped exposing Geometry Nodes modifier inputs as plain ID-properties on
+  the modifier (`mod["Socket_6"]`) and moved them to
+  `mod.properties.inputs.Socket_6.value`. The old form now raises
+  `TypeError: id properties not supported for this type`. This surfaced three
+  ways, only the first of which was visible:
+  - **Hard crash**: `_sync_gesture_spline_gn` wrote sockets unguarded, so
+    `load_chains` — and therefore Auto Rig's final step — aborted outright.
+  - **Silent no-op rebinding**: the four socket-walking loops in
+    `plotting/ops_steps.py` (steps 2, 8, 10, 11) *read* via
+    `mod[item.identifier]` inside `except (KeyError, TypeError): continue`.
+    Every socket therefore raised and was skipped, so template references were
+    never rewritten. The generated rig kept `Module_name = "<12_Handles>"` and
+    `Deform Armature = <12_Handles>.Rig`, which also pinned the hidden template
+    armature into the character's modifier stack — that is why the plotting
+    bones stayed visible at the origin.
+  - **Silent no-op smoothness**: `_on_handle_smoothness_update` wrote inside a
+    bare `except Exception: pass`, so `bone_handle_smoothness` never reached
+    the modifier.
+
+  Added `_gn_socket` / `_get_gn_input` / `_set_gn_input` in
+  `shared/utils_gn.py` (5.2 path first, ID-property fallback for 5.1;
+  `_set_gn_input` returns a bool instead of failing silently) and routed every
+  call site through them. Panel entries in `interface.items_tree` carry an
+  **int** identifier — previously swallowed by the `try/except` by accident —
+  so the helpers reject non-`str` ids explicitly.
+
+  Also fixed a third 5.2 change this exposed: **menu sockets take the item name,
+  not its index**, so `Control MODE` failed with `expected a string enum, not
+  int`. Added `CONTROL_MODE_GN_NAME` beside `CONTROL_MODE_GN_INT` and try
+  name → int. Verified on `CHR_BongBong.blend`: Auto Rig runs clean and
+  idempotently, `Module_name` → `Body`, `Deform Armature` → `CHR_BongBong`,
+  `Control MODE` → `3 Points`, zero remaining template references. 5.1 goes
+  through the legacy fallbacks (untested).
 - **Expression Sheet (shared) hung Blender on Library Override**: a material
   node-tree driver targeting the gesture armature (the per-instance UV shift
   values) triggers a pathological loop in Blender 5.2's override resolver on

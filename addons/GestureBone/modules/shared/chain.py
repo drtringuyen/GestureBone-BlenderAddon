@@ -9,6 +9,7 @@ from bpy.props import (
     StringProperty, BoolProperty, IntProperty, FloatProperty,
     CollectionProperty, EnumProperty, PointerProperty,
 )
+from .utils_gn import _set_gn_input
 
 # ── Mode constants ─────────────────────────────────────────────────────────────
 
@@ -22,8 +23,10 @@ CONTROL_MODE_COUNT = {
     'PT_3': 3,
     'PT_2': 3,  # 2 gesture points, 3 bones: _0 (start), _2 (handle), _4 (end)
 }
-# GN integer value for "Control MODE" socket
-CONTROL_MODE_GN_INT = {'PT_5': 0, 'PT_3': 1, 'PT_2': 2}
+# GN value for the "Control MODE" menu socket.
+# Blender 5.2 menu sockets take the item name; older versions take its index.
+CONTROL_MODE_GN_INT  = {'PT_5': 0, 'PT_3': 1, 'PT_2': 2}
+CONTROL_MODE_GN_NAME = {'PT_5': "5 Points", 'PT_3': "3 Points", 'PT_2': "2 Points"}
 
 PLOTTING_MODES = [
     ('SYM_10', "10 Symmetry", "10 plotting points — symmetric"),
@@ -126,7 +129,7 @@ def _on_handle_smoothness_update(self, context):
             continue
         if mod.node_group.name == "TOB-Gesture_drawing":
             try:
-                mod["Socket_6"] = self.bone_handle_smoothness
+                _set_gn_input(mod, "Socket_6", self.bone_handle_smoothness)
                 spline.update_tag()
             except Exception:
                 pass

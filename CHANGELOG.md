@@ -29,6 +29,16 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the current design.
   Presentation-only; verified to draw on both Blender 5.1 and 5.2.
 
 ### Changed (Aug 2026)
+- **Expression Sheet: Pose-mode expression-grid hotkey is now user-rebindable.**
+  The grid still defaults to `E` in Pose Mode, but the Expression Sheet panel
+  now shows a live, clickable hotkey field next to "Pose Expression" backed by
+  `wm.keyconfigs.user` (`ops_pose_expr.get_keymap_item()`), instead of a static
+  "Press E" label. Needed because plain `E` is unusable on macOS, and
+  Alt/Ctrl/Shift+E are already Blender's built-in keyframe-interpolation
+  hotkeys, so no single alternate default works for everyone. Rebinding
+  persists across restarts via Blender's normal preferences save, per Blender
+  version/profile — it does not ship with the addon zip, so each install still
+  starts at the `E` default.
 - **Expression Sheet: UV From Bone (Shared) node graph packed into a float4.**
   Each instance used to need six satellite nodes (five `ShaderNodeAttribute`
   feeds, one per driven socket, plus a UV Map node) and 12 driver fcurves on

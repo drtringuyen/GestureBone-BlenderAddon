@@ -8,6 +8,7 @@ hint, and a pointer to the Shader Editor node that reads exp_index back.
 import bpy
 
 from .ops_cell import cell_index
+from .ops_pose_expr import get_keymap_item
 
 
 class GESTUREBONE_PT_ExpressionSheet(bpy.types.Panel):
@@ -46,7 +47,15 @@ class GESTUREBONE_PT_ExpressionSheet(bpy.types.Panel):
         # -- Pose-mode expression grid ------------------------------------
         col = layout.column(align=True)
         col.label(text="Pose Expression", icon='POSE_HLT')
-        col.label(text="Press E in Pose Mode to open the grid", icon='INFO')
+
+        found = get_keymap_item()
+        if found:
+            _, kmi = found
+            row = col.row(align=True)
+            row.label(text="Hotkey (Pose Mode):")
+            row.prop(kmi, "type", text="", full_event=True)
+        else:
+            col.label(text="Press E in Pose Mode to open the grid", icon='INFO')
 
         obj = context.active_object
         if obj and obj.type == 'ARMATURE' and obj.mode == 'POSE':

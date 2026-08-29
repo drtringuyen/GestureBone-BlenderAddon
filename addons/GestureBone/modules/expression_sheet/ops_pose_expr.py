@@ -1,5 +1,7 @@
 """
-expression_sheet/ops_pose_expr.py — Pose-mode expression grid (E key).
+expression_sheet/ops_pose_expr.py — Pose-mode expression grid (E key by
+default; user-rebindable, since E is unusable on macOS and Alt/Ctrl/Shift+E
+are already Blender's keyframe-interpolation hotkeys).
 
 Merged from the standalone PoseExpressionGrid script. Opens the shared sprite
 grid in Pose mode and keyframes each selected bone's ``exp_index`` as a
@@ -195,3 +197,22 @@ def unregister():
     _addon_keymaps.clear()
 
     bpy.utils.unregister_class(GESTUREBONE_OT_PoseExpressionGrid)
+
+
+def get_keymap_item():
+    """(km, kmi) for the expression-grid hotkey, editable via the UI, or None.
+
+    Reads back through wm.keyconfigs.user so edits made in the UI (which
+    Blender stores as a user override) are reflected immediately.
+    """
+    if not _addon_keymaps:
+        return None
+    km_addon, kmi_addon = _addon_keymaps[0]
+    wm = bpy.context.window_manager
+    km_user = wm.keyconfigs.user.keymaps.get(km_addon.name)
+    if km_user is None:
+        return None
+    for kmi in km_user.keymap_items:
+        if kmi.idname == kmi_addon.idname:
+            return km_user, kmi
+    return None

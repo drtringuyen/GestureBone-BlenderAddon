@@ -9,6 +9,7 @@ from ..shared.utils import (
     _ensure_child_coll, _move_obj_to_coll, _rig_target_colls, _atomic_coll,
     _clean, _rename_coll_tree, _all_bone_colls,
 )
+from ..shared.utils_gn import _get_gn_input, _set_gn_input
 
 
 def _p(context):
@@ -159,18 +160,15 @@ class GESTUREBONE_OT_RebindConstraintsGeonodes(bpy.types.Operator):
                 continue
             if 'OUTPUT' in str(getattr(item, 'in_out', 'INPUT')):
                 continue
-            try:
-                value = mod[item.identifier]
-            except (KeyError, TypeError):
-                continue
+            value = _get_gn_input(mod, item.identifier)
             if isinstance(value, bpy.types.Object) and value and token in value.name:
                 new_obj = bpy.data.objects.get(f"{meta_rig_name}-{_clean(value.name, token, bone_name)}")
                 if not new_obj:
                     new_obj = bpy.data.objects.get(value.name.replace(token, bone_name))
                 if new_obj:
-                    mod[item.identifier] = new_obj
+                    _set_gn_input(mod, item.identifier, new_obj)
             elif isinstance(value, str) and token in value:
-                mod[item.identifier] = value.replace(token, bone_name)
+                _set_gn_input(mod, item.identifier, value.replace(token, bone_name))
 
     def execute(self, context):
         arm = _arm(context)
@@ -314,14 +312,11 @@ class GESTUREBONE_OT_RebindFinalArmatures(bpy.types.Operator):
                 continue
             if 'OUTPUT' in str(getattr(item, 'in_out', 'INPUT')):
                 continue
-            try:
-                value = mod[item.identifier]
-            except (KeyError, TypeError):
-                continue
+            value = _get_gn_input(mod, item.identifier)
             if isinstance(value, bpy.types.Object):
                 new_ref = self._redirect(value, gest_target, rig_target)
                 if new_ref:
-                    mod[item.identifier] = new_ref
+                    _set_gn_input(mod, item.identifier, new_ref)
 
     def execute(self, context):
         arm = _arm(context)
@@ -535,12 +530,9 @@ class GESTUREBONE_OT_MergeRigIntoMetaRig(bpy.types.Operator):
                 continue
             if 'OUTPUT' in str(getattr(item, 'in_out', 'INPUT')):
                 continue
-            try:
-                value = mod[item.identifier]
-            except (KeyError, TypeError):
-                continue
+            value = _get_gn_input(mod, item.identifier)
             if isinstance(value, bpy.types.Object) and value is from_obj:
-                mod[item.identifier] = to_obj
+                _set_gn_input(mod, item.identifier, to_obj)
 
     def execute(self, context):
         arm = _arm(context)
@@ -599,17 +591,14 @@ class GESTUREBONE_OT_RebindArmatureDeform(bpy.types.Operator):
                 continue
             if 'OUTPUT' in str(getattr(item, 'in_out', 'INPUT')):
                 continue
-            try:
-                value = mod[item.identifier]
-            except (KeyError, TypeError):
-                continue
+            value = _get_gn_input(mod, item.identifier)
             if isinstance(value, bpy.types.Object):
                 if value is not arm_obj and value.type == 'ARMATURE':
-                    mod[item.identifier] = arm_obj
-            elif value is None:
+                    _set_gn_input(mod, item.identifier, arm_obj)
+            elif value is None and getattr(item, 'socket_type', None) == 'NodeSocketObject':
                 name_lower = getattr(item, 'name', '').lower()
                 if any(kw in name_lower for kw in ('armature', 'rig', 'deform')):
-                    mod[item.identifier] = arm_obj
+                    _set_gn_input(mod, item.identifier, arm_obj)
 
     def execute(self, context):
         arm = _arm(context)

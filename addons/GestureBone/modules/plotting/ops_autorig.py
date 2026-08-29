@@ -10,7 +10,10 @@ from .utils import _active_plotting_arm, _ensure_object_mode, _default_template
 from ..shared.utils import (
     _bones_in_bone_coll, _all_bone_colls, _delete_coll, _rig_target_colls,
 )
-from ..shared.chain import CONTROL_MODE_COUNT, CONTROL_MODE_GN_INT, _ctrl_bone_indices
+from ..shared.chain import (
+    CONTROL_MODE_COUNT, CONTROL_MODE_GN_INT, CONTROL_MODE_GN_NAME, _ctrl_bone_indices,
+)
+from ..shared.utils_gn import _set_gn_input
 
 
 # Steps run by RigPart (Step 5 is interactive — skipped in auto mode)
@@ -45,7 +48,12 @@ def _invoke_op(idname):
     return getattr(getattr(bpy.ops, ns), name)()
 
 
-def _apply_control_mode_to_plotting(plotting_obj, gn_int_value):
+def _apply_control_mode_to_plotting(plotting_obj, gn_name_value, gn_int_value):
+    """Set the 'Control MODE' menu socket on the plotting spline's GN modifier.
+
+    Blender 5.2 menu sockets take the item name ("5 Points"); older versions
+    take its index. Try the name first, fall back to the int.
+    """
     if not plotting_obj:
         return False
     for mod in plotting_obj.modifiers:
@@ -61,11 +69,14 @@ def _apply_control_mode_to_plotting(plotting_obj, gn_int_value):
             if 'OUTPUT' in str(getattr(item, 'in_out', 'INPUT')):
                 continue
             if item.name == 'Control MODE':
-                try:
-                    mod[item.identifier] = gn_int_value
-                    return True
-                except Exception:
-                    pass
+                for candidate in (gn_name_value, gn_int_value):
+                    if candidate is None:
+                        continue
+                    try:
+                        if _set_gn_input(mod, item.identifier, candidate):
+                            return True
+                    except TypeError:
+                        continue
     return False
 
 
@@ -110,11 +121,12 @@ def _apply_control_mode(context, arm, bone_name):
         return
     mode    = chain.control_mode
     gn_int  = CONTROL_MODE_GN_INT.get(mode, 0)
+    gn_name = CONTROL_MODE_GN_NAME.get(mode)
     meta_rig_name = arm.name
 
     plotting_name = f"{meta_rig_name}-{bone_name}.PlottingSpline"
     plotting_obj  = bpy.data.objects.get(plotting_name)
-    _apply_control_mode_to_plotting(plotting_obj, gn_int)
+    _apply_control_mode_to_plotting(plotting_obj, gn_name, gn_int)
 
     if mode in ('PT_2', 'PT_3'):
         # Step 1 names the WIP copy "{meta_rig_name}-{bone_name}.Gesture".

@@ -43,6 +43,53 @@ def _find_socket_id(mod, socket_name):
     return None
 
 
+def _gn_socket(mod, socket_id):
+    """Return the Blender 5.2+ modifier input wrapper for socket_id, else None.
+
+    Panel items in interface.items_tree carry an int identifier — those are
+    never sockets, so reject any non-str id up front.
+    """
+    if not isinstance(socket_id, str):
+        return None
+    props = getattr(mod, "properties", None)
+    inputs = getattr(props, "inputs", None) if props else None
+    if inputs is None:
+        return None
+    return getattr(inputs, socket_id, None)
+
+
+def _get_gn_input(mod, socket_id, default=None):
+    """Read a GN modifier input by socket identifier.
+
+    Blender 5.2 moved modifier inputs off plain ID-properties
+    (mod["Socket_X"]) onto mod.properties.inputs.Socket_X.value; older
+    versions still use the ID-property form. Sockets that carry no value
+    (Geometry) and unknown ids return `default`.
+    """
+    socket = _gn_socket(mod, socket_id)
+    if socket is not None:
+        return getattr(socket, "value", default)
+    try:
+        return mod[socket_id]
+    except (KeyError, TypeError):
+        return default
+
+
+def _set_gn_input(mod, socket_id, value):
+    """Set a GN modifier input by socket identifier. Returns True if written."""
+    socket = _gn_socket(mod, socket_id)
+    if socket is not None:
+        if not hasattr(socket, "value"):
+            return False
+        socket.value = value
+        return True
+    try:
+        mod[socket_id] = value
+        return True
+    except (KeyError, TypeError):
+        return False
+
+
 def _ensure_object_collections_visible(view_layer, obj):
     """Ensure all collections containing obj are not excluded from the view layer."""
     def _set_visible(layer_coll, target_coll):
@@ -69,6 +116,6 @@ def _sync_gesture_spline_gn(chain):
     if mod is None:
         mod = spline.modifiers.new(name="GeometryNodes", type='NODES')
         mod.node_group = ng
-    mod["Socket_10"] = chain.control_point_count
-    mod["Socket_8"]  = 2
-    mod["Socket_6"]  = chain.bone_handle_smoothness
+    _set_gn_input(mod, "Socket_10", chain.control_point_count)
+    _set_gn_input(mod, "Socket_8", 2)
+    _set_gn_input(mod, "Socket_6", chain.bone_handle_smoothness)

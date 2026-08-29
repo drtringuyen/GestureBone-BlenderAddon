@@ -72,9 +72,38 @@ class GESTUREBONE_PT_ExpressionSheet(bpy.types.Panel):
         col.label(text="- UV From Bone (Shared)", icon='UV')
 
 
+class GESTUREBONE_PT_ExpressionSheetNodeTools(bpy.types.Panel):
+    bl_label       = "Expression Sheet"
+    bl_idname      = "GESTUREBONE_PT_expression_sheet_node_tools"
+    bl_space_type  = 'NODE_EDITOR'
+    bl_region_type = 'UI'
+    bl_category    = "GestureBone"
+
+    @classmethod
+    def poll(cls, context):
+        space = context.space_data
+        return space.tree_type == 'ShaderNodeTree'
+
+    def draw(self, context):
+        layout = self.layout
+        col = layout.column(align=True)
+
+        tree = context.space_data.edit_tree
+        node = tree.nodes.active if tree is not None else None
+
+        if node is None or node.bl_idname != "ShaderNodeCustomUVFromBoneShared":
+            col.label(text="Select a 'UV From Bone (Shared)' node", icon='INFO')
+            return
+
+        col.label(text=node.name, icon='UV')
+        col.operator("gesturebone.tidy_expression_node_driver", icon='SORTALPHA')
+
+
 def register():
     bpy.utils.register_class(GESTUREBONE_PT_ExpressionSheet)
+    bpy.utils.register_class(GESTUREBONE_PT_ExpressionSheetNodeTools)
 
 
 def unregister():
+    bpy.utils.unregister_class(GESTUREBONE_PT_ExpressionSheetNodeTools)
     bpy.utils.unregister_class(GESTUREBONE_PT_ExpressionSheet)

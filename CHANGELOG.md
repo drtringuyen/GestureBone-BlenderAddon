@@ -87,6 +87,46 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the current design.
   untouched v1 production file into a fresh file under the new addon: it stays
   on v1 (780 drivers, legacy property names) and still animates correctly.
 
+### Added (Aug 2026)
+- **"Tidy Expression Node & Driver" operator** (`gesturebone.tidy_expression_node_driver`),
+  a button in the Shader Editor's GestureBone tab, enabled only when the
+  active node is a `UV From Bone (Shared)` node. One click:
+  - Renames the driven custom-property keys on every mesh, and the UV
+    Map/Attribute feed nodes' labels, from the generic Blender counter name
+    (`UV From Bone.009`) to the bone the instance is wired to (`EXP-Iris.L`).
+    **`node.name` itself is left untouched** — it's the stable lookup
+    identity `_ensure_attr_feed`/`_remove_attr_feeds`/the orphan-sweep timer
+    already key off; renaming it would orphan-and-duplicate feed nodes on
+    the next unrelated refresh (armature/bone repick, invert-flag toggle,
+    load-time self-heal). A hidden per-node marker
+    (`node["_gb_key_ident"]`, see `_instance_key_ident()`) tracks which
+    identity is currently baked into the mesh's property keys, defaulting to
+    `node.name` so untouched instances behave exactly as before.
+  - Property key order is `{bone}::{tree name}::{socket}` — bone first, not
+    last — because Blender's N-panel property list truncates long names in
+    the *middle*, so front and back survive and the middle gets eaten. Bone
+    name up front means it survives truncation instead of the tree-name
+    boilerplate. The cleanup sweep matches both this and the pre-reorder
+    ordering, so a file with properties from either format never ends up
+    with duplicates after a rebuild.
+  - Groups the node + its own feed nodes into a dedicated `NodeFrame`
+    labeled with the bone name — identified by a fixed name
+    (`node.name + "__Frame"`), never by "whatever frame the node happens to
+    already be parented to," so it can't hijack/relabel an unrelated shared
+    frame a material author built for their own layout.
+  - Attribute feeds collapse to pills (every unlinked socket hidden, then
+    the node itself collapsed); the UV Map feed is left open since its
+    UV-layer picker is worth reaching without expanding it. The satellite
+    column is vertically centered on the main node's actual drawn height
+    (`node.dimensions.y`), re-derived from the main node's now-frame-relative
+    location every run (a node's `.location` is relative to its parent
+    frame, not tree-absolute — the reason an earlier pass at this piled
+    every satellite on top of each other the instant they were parented).
+  - Re-running is idempotent: same frame reused, same 1:1 satellite count,
+    no drift, whether or not the naming needed any work that pass.
+  - Verified against the real `CHR_LittlePig.blend` production file on all
+    5 existing node instances.
+
 ### Fixed (Aug 2026)
 - **Expression Sheet (shared) hung Blender on Library Override**: a material
   node-tree driver targeting the gesture armature (the per-instance UV shift

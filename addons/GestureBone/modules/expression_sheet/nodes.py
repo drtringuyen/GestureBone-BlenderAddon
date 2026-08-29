@@ -440,11 +440,38 @@ def _clear_legacy_socket_drivers(node):
     container.driver_remove(_legacy_socket_path(name, "Exp Index In"))
 
 
+def _instance_key_ident(node):
+    """Base identifier baked into this instance's per-instance property keys
+    and satellite feed-node labels. Defaults to node.name (today's behavior)
+    until a Tidy pass (see tidy_expression_node_and_driver below) switches it
+    to the bone name via a marker stored ON THE NODE -- never on node.name
+    itself. Each satellite's own identity in the tree (node.name + a fixed
+    suffix, what _ensure_attr_feed / _remove_attr_feeds / the orphan-sweep
+    timer look it up by) is intentionally NOT derived from this and never
+    moves, so a Tidy pass can't orphan-and-duplicate a feed node the way
+    renaming node.name itself would."""
+    try:
+        v = node.get("_gb_key_ident")
+    except Exception:
+        v = None
+    return v if v else node.name
+
+
 def _prop_key(container, node, socket_name):
     """Unique custom-property name for one driven socket of one node
     instance, namespaced by the node tree so multiple materials on the same
-    mesh object can't collide."""
-    return "{}::{}::{}".format(container.name, node.name, socket_name)
+    mesh object can't collide.
+
+    Identity first, tree name second, socket last -- deliberately, not just
+    for reading order: Blender's N-panel property list truncates long names
+    in the MIDDLE, so whatever sits at the front and the back survives a
+    truncation and the middle segment is what gets eaten. Putting the bone
+    name up front and the socket at the back means the two things worth
+    reading survive; the tree-name boilerplate is what disappears into the
+    ellipsis. Nothing outside this module inspects this string's internal
+    order -- _ensure_attr_feed only requires the socket to be the LAST
+    segment (it does prop_key.rsplit("::", 1)[-1])."""
+    return "{}::{}::{}".format(_instance_key_ident(node), container.name, socket_name)
 
 
 def _materials_using_tree(tree):
@@ -513,13 +540,24 @@ def _resolve_driver_armature(armature, obj):
 def _clear_instance_props_and_drivers(node):
     """Remove this node's driven custom properties (and their drivers) from
     EVERY mesh object, not just the current targets -- so a stale prop left
-    behind by a since-changed material assignment doesn't linger."""
+    behind by a since-changed material assignment doesn't linger.
+
+    Matches BOTH key-segment orders (identity::tree:: and tree::identity::),
+    not just whatever _prop_key currently emits: a file can carry properties
+    built under an older ordering (e.g. before the identity-first reorder for
+    N-panel readability), and this sweep must still find and remove them --
+    otherwise a rebuild under the current order leaves the old one behind as
+    a permanent duplicate instead of replacing it."""
     container = node.id_data
-    prefix = "{}::{}::".format(container.name, node.name)
+    ident = _instance_key_ident(node)
+    prefixes = (
+        "{}::{}::".format(ident, container.name),
+        "{}::{}::".format(container.name, ident),
+    )
     for obj in bpy.data.objects:
         if obj.type != 'MESH':
             continue
-        for key in [k for k in obj.keys() if k.startswith(prefix)]:
+        for key in [k for k in obj.keys() if k.startswith(prefixes)]:
             try:
                 obj.driver_remove('["{}"]'.format(key))
             except Exception:
@@ -683,7 +721,7 @@ def _ensure_attr_feed(node, suffix, prop_key, wiring, y_offset, collapse=True):
                 pass
         attr = container.nodes.new('ShaderNodeAttribute')
         attr.name = attr_name
-    attr.label = "{} for {}".format(prop_key.rsplit("::", 1)[-1], node.name)
+    attr.label = "{} for {}".format(prop_key.rsplit("::", 1)[-1], _instance_key_ident(node))
     attr.location = (node.location.x - 240, node.location.y + y_offset)
     attr.attribute_type = 'OBJECT'
     attr.attribute_name = prop_key
@@ -716,14 +754,20 @@ def _ensure_uv_map_feed(node):
     if not _can_edit(container):
         return
     uv_in = node.inputs.get("UV")
-    if uv_in is None or uv_in.links:
+    if uv_in is None:
         return
     name = node.name + UVFB_UVMAP_SUFFIX
     uvmap = container.nodes.get(name)
+    # Refresh the label every call (not just at creation) so a Tidy pass
+    # (see _instance_key_ident) can relabel it even once it's already linked.
+    if uvmap is not None and uvmap.bl_idname == 'ShaderNodeUVMap':
+        uvmap.label = "UV for " + _instance_key_ident(node)
+    if uv_in.links:
+        return
     if uvmap is None or uvmap.bl_idname != 'ShaderNodeUVMap':
         uvmap = container.nodes.new('ShaderNodeUVMap')
         uvmap.name = name
-        uvmap.label = "UV for " + node.name
+        uvmap.label = "UV for " + _instance_key_ident(node)
         uvmap.location = (node.location.x - 240, node.location.y - 200)
         # Leave uvmap.uv_map = "" -> Blender uses the active UV layer.
     container.links.new(uvmap.outputs['UV'], uv_in)
@@ -883,6 +927,158 @@ def refresh_uv_from_bone_shared(node):
         _build_drivers_v2(node, targets, armature, bone)
     else:
         _build_drivers_v1(node, targets, armature, bone)
+
+
+# ---------------------------------------------------------------------------
+# Manual "Tidy" operator support (GESTUREBONE_OT_tidy_expression_node_driver
+# in operators.py).
+#
+# Cosmetic pass, explicitly user-triggered: repoints this instance's property
+# keys and satellite feed-node labels from the generic node name to the bone
+# they're actually wired to, and groups the node + its own feed nodes into a
+# dedicated frame labeled with the bone name. Deliberately NOT wired into
+# _on_update -- see _instance_key_ident's docstring for why touching
+# node.name itself (the obvious-looking approach) is unsafe here.
+# ---------------------------------------------------------------------------
+
+FRAME_SUFFIX = "__Frame"
+
+
+def _own_upstream_feeders(node):
+    """Upstream nodes whose ENTIRE output fan-out lands only on this node's
+    own inputs -- i.e. small per-instance feed nodes (UV Map, Attribute)
+    built for this instance specifically, regardless of which schema/suffix
+    they happen to use. A feeder that also drives something else is shared
+    and left alone, never swept into this node's frame."""
+    feeders = []
+    seen = set()
+    for sock in node.inputs:
+        for link in sock.links:
+            src = link.from_node
+            if src.name in seen:
+                continue
+            exclusive = all(l.to_node == node for out in src.outputs for l in out.links)
+            if exclusive:
+                seen.add(src.name)
+                feeders.append(src)
+    return feeders
+
+
+def group_into_frame(node, bone):
+    """Ensure this node + its own feed nodes sit in ONE dedicated frame
+    labeled with the bone name -- creating it if missing, or just relabeling
+    it if it's already there.
+
+    Identified by a fixed name derived from node.name (node.name +
+    FRAME_SUFFIX) -- stable tree identity, exactly like _instance_key_ident
+    keeps satellite lookup stable -- never by "whatever frame the node
+    happens to be parented to right now". A node can already be sitting in
+    an unrelated, shared frame (a material author's own layout grouping);
+    blindly adopting and relabeling THAT would corrupt it for everything
+    else living in it. This only ever touches a frame it created itself."""
+    container = node.id_data
+    frame_name = node.name + FRAME_SUFFIX
+    frame = container.nodes.get(frame_name)
+    if frame is None or frame.bl_idname != 'NodeFrame':
+        frame = container.nodes.new('NodeFrame')
+        frame.name = frame_name
+    frame.label = bone
+
+    node.parent = frame
+    feeders = _own_upstream_feeders(node)
+    for feeder in feeders:
+        feeder.parent = frame
+        _set_satellite_display(feeder)
+
+    _stack_satellites(node, feeders)
+    return frame
+
+
+def _set_satellite_display(feeder):
+    """Attribute feeds collapse to a small pill (hide every socket with no
+    link first, so an expanded view never shows unused rows either, then
+    collapse the node itself) -- there's nothing on them worth looking at
+    directly, just a machine-generated property name. The UV Map feed stays
+    open: its UV-layer picker is the one thing on any of these satellites a
+    user actually needs to reach without expanding it first."""
+    if feeder.bl_idname == 'ShaderNodeUVMap':
+        feeder.hide = False
+        return
+    for socket in list(feeder.inputs) + list(feeder.outputs):
+        if not socket.links:
+            socket.hide = True
+    feeder.hide = True
+
+
+# Fixed, not read off feeder.dimensions -- dimensions reflects the LAST
+# drawn size, which is still the PRE-collapse box the instant after this
+# same call changes .hide, so it can't be trusted here.
+_PILL_HEIGHT = 40
+_OPEN_UVMAP_HEIGHT = 110
+
+
+def _stack_satellites(node, feeders):
+    """Stack feeders vertically in a column to the left of the main node,
+    the whole column vertically centered on the main node's own height.
+
+    A node's .location is relative to its PARENT frame, not the tree's
+    absolute space. Every feeder's location was originally computed as an
+    absolute-space offset from the main node (see _ensure_attr_feed /
+    _ensure_uv_map_feed), so the instant it gets re-parented in
+    group_into_frame that same number is reinterpreted as frame-relative --
+    which is why, unfixed, they all pile up on top of each other near the
+    frame's origin instead of spreading out."""
+    if not feeders:
+        return
+    gap = 16
+    heights = [_OPEN_UVMAP_HEIGHT if f.bl_idname == 'ShaderNodeUVMap' else _PILL_HEIGHT
+               for f in feeders]
+    total = sum(heights) + gap * (len(feeders) - 1)
+    node_h = max(node.dimensions.y, 200)
+    x = node.location.x - 220
+    y = node.location.y - (node_h - total) / 2
+    for feeder, h in zip(feeders, heights):
+        feeder.location = (x, y)
+        y -= h + gap
+
+
+def tidy_expression_node_and_driver(node):
+    """Rename this node's driver property keys (and its UV Map / Attribute
+    feed nodes' labels) from the generic node name to the bone this instance
+    is wired to, and make sure it's grouped into its own dedicated frame
+    labeled with that bone name. node.name itself is never touched, and
+    neither is any satellite's own tree identity -- only
+    _instance_key_ident's marker, the property key strings on target meshes,
+    and display labels/frame membership change.
+
+    Returns the new identity (the bone name) on success, or None if no valid
+    Armature+Bone is set on the node yet."""
+    if not _can_edit(node.id_data):
+        return None  # linked/library tree -- a write here would never be saved
+
+    armature = node.armature_obj
+    bone = node.bone_name
+    if not (armature and armature.type == 'ARMATURE'
+            and bone and bone in armature.data.bones):
+        return None
+
+    if _instance_key_ident(node) != bone:
+        # Tear down whatever is keyed under the CURRENT (about-to-be-stale)
+        # identity before switching it, so nothing is left behind on the mesh.
+        _clear_instance_props_and_drivers(node)
+
+        node["_gb_key_ident"] = bone
+
+        # Rebuild fresh under the new identity. Satellite nodes keep their
+        # own tree identity (node.name + suffix) throughout, so this reuses
+        # them in place rather than creating new ones.
+        refresh_uv_from_bone_shared(node)
+
+    # Framing is checked/fixed every run, independent of whether the naming
+    # needed any work above -- re-clicking Tidy should always leave both in
+    # a correct state, not just the first time.
+    group_into_frame(node, bone)
+    return bone
 
 
 def _on_update(self, context):

@@ -93,7 +93,9 @@ class GESTUREBONE_OT_expression_bone_remove(bpy.types.Operator):
     bl_label = "Remove Expression Bone"
     bl_options = {'REGISTER', 'UNDO'}
 
-    index: IntProperty(default=-1, options={'SKIP_SAVE'})
+    # HIDDEN keeps the index out of the confirm dialog, which would otherwise
+    # draw it as an editable number field next to the checkbox.
+    index: IntProperty(default=-1, options={'SKIP_SAVE', 'HIDDEN'})
     purge_property: BoolProperty(
         name="Also Delete exp_index",
         description="Delete the bone's exp_index custom property too. Off by "
@@ -101,6 +103,10 @@ class GESTUREBONE_OT_expression_bone_remove(bpy.types.Operator):
                     "it orphans their f-curves",
         default=False,
     )
+
+    @classmethod
+    def poll(cls, context):
+        return _armature(context) is not None
 
     def invoke(self, context, event):
         return context.window_manager.invoke_props_dialog(self)
@@ -133,11 +139,15 @@ class GESTUREBONE_OT_expression_bone_move(bpy.types.Operator):
     bl_label = "Move Expression Bone"
     bl_options = {'REGISTER', 'UNDO'}
 
-    index: IntProperty(default=-1, options={'SKIP_SAVE'})
+    index: IntProperty(default=-1, options={'SKIP_SAVE', 'HIDDEN'})
     direction: EnumProperty(
         items=[('UP', "Up", ""), ('DOWN', "Down", "")],
-        options={'SKIP_SAVE'},
+        options={'SKIP_SAVE', 'HIDDEN'},
     )
+
+    @classmethod
+    def poll(cls, context):
+        return _armature(context) is not None
 
     def execute(self, context):
         arm = _armature(context)

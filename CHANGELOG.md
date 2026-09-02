@@ -96,6 +96,23 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the current design.
   bone's `exp_index` in the panel showing an unrelated number, which read as if
   the two were the same thing.
 
+### Fixed (Sep 2026)
+- **Expression Sheet: a manual rewire of a UV From Bone (Shared) input no
+  longer gets stomped on file open.** Patching your own node chain in front of
+  `Bone UV` (or `Bone Scale` / `Exp Index In`) survived a save but was silently
+  destroyed on the next reopen — the `load_post` self-heal
+  (`migrate_legacy_drivers` -> `refresh_uv_from_bone_shared`) ran
+  `_ensure_attr_feed`, whose auto-wire only skipped a socket already fed by
+  that exact Attribute output and otherwise called `links.new()`, which
+  replaces whatever link is there. It now reconnects only a socket that is
+  EMPTY or still fed by one of the instance's own satellites
+  (`_own_satellite_names`: both schemas' `__ATTR_*` feeds plus `__UVForBone`);
+  any other source is treated as a deliberate user edit and left alone. The
+  self-heal this loop exists for — repointing a stale/wrong satellite — is
+  unaffected. Verified live on Blender 5.2 against a real instance: a patched
+  user node survives the refresh, while an empty socket and one fed by the
+  wrong own satellite are both still rewired correctly.
+
 ### Changed (Aug 2026)
 - **Expression Sheet: Pose-mode expression-grid hotkey is now user-rebindable.**
   The grid still defaults to `E` in Pose Mode, but the Expression Sheet panel

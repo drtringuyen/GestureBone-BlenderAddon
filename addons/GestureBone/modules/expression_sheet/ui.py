@@ -110,19 +110,15 @@ class GESTUREBONE_PT_ExpressionSheet(bpy.types.Panel):
             # The live custom property, not a copy: this is the value the
             # shader-node drivers read, and drawing it directly keeps one
             # source of truth (and puts right-click > Insert Keyframe on it).
+            # Width-capped so the bone name keeps the rest of the row — in a
+            # default-width sidebar an uncapped field truncates it to "EXP-...",
+            # which is the one thing the header has to be readable.
             if pb is not None and _EXP_PROP in pb.keys():
-                row.prop(pb, '["%s"]' % _EXP_PROP, text="")
+                idx_sub = row.row(align=True)
+                idx_sub.ui_units_x = 3.0
+                idx_sub.prop(pb, '["%s"]' % _EXP_PROP, text="")
             else:
                 row.label(text="no index")
-
-            if len(entries) > 1:
-                move = row.row(align=True)
-                up = move.operator("gesturebone.expression_bone_move", text="",
-                                   icon='TRIA_UP')
-                up.index, up.direction = i, 'UP'
-                dn = move.operator("gesturebone.expression_bone_move", text="",
-                                   icon='TRIA_DOWN')
-                dn.index, dn.direction = i, 'DOWN'
 
             rm = row.operator("gesturebone.expression_bone_remove", text="",
                               icon='X')
@@ -140,7 +136,10 @@ class GESTUREBONE_PT_ExpressionSheet(bpy.types.Panel):
             grid_row.prop(entry, "grid_count")
             grid_row.prop(entry, "grid_size")
 
-            pick = body.row(align=True)
+            # Reordering is cosmetic (nothing reads the list order), so the
+            # arrows live down here rather than competing with the bone name.
+            bottom = body.row(align=True)
+            pick = bottom.row(align=True)
             pick.enabled = pb is not None
             op = pick.operator(
                 "gesturebone.expression_cell_pick",
@@ -148,6 +147,16 @@ class GESTUREBONE_PT_ExpressionSheet(bpy.types.Panel):
                 icon='SNAP_VERTEX',
             )
             op.bone = entry.bone
+
+            if len(entries) > 1:
+                move = bottom.row(align=True)
+                move.ui_units_x = 2.0
+                up = move.operator("gesturebone.expression_bone_move", text="",
+                                   icon='TRIA_UP')
+                up.index, up.direction = i, 'UP'
+                dn = move.operator("gesturebone.expression_bone_move", text="",
+                                   icon='TRIA_DOWN')
+                dn.index, dn.direction = i, 'DOWN'
 
 
 class GESTUREBONE_PT_ExpressionSheetNodeTools(bpy.types.Panel):

@@ -59,6 +59,13 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the current design.
     the property's UI range to the bone's own grid, and reports entries whose
     bone no longer exists rather than silently dropping them. Manual by design —
     the earlier load-time auto-heal (`0a0f369`) shipped two regressions.
+  - Verified on `CHR_BongBong` in Blender 5.2: Sync registers and is idempotent,
+    per-bone `grid_count` drives the `exp_index` UI clamp (max 15 at 4×4, 63 at
+    8×8), removing an entry leaves the custom property intact for its f-curves,
+    a bone renamed out from under an entry is reported and not dropped, and the
+    panel keys through the header field (Blender shows it animated).
+  - Note `grid_count` is picker-only — the material's own UV grid math is
+    independent and must be kept in step by hand.
   - See [docs/expression-bones-design.md](docs/expression-bones-design.md).
 
 ### Removed (Sep 2026)

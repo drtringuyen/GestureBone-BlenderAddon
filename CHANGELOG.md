@@ -28,6 +28,49 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the current design.
   row; plotting shows a "Registration" box and a wide Auto Rig + icon cluster.
   Presentation-only; verified to draw on both Blender 5.1 and 5.2.
 
+### Added (Sep 2026)
+- **Expression Sheet: per-bone sprite sheets ("Expression Bones").** The single
+  scene-wide `Sheet` + `Cell N` pair is replaced by an explicit registry on the
+  armature — `Object.gesturebone_props.expression_bones` — where each entry
+  binds one pose bone to its own sheet image, grid count and (optional) picker
+  cell size. The panel draws them as a foldout list with the bone's live
+  `exp_index` beside each one. Scene settings remain as the fallback for
+  unregistered bones and as the default cell size, which is a monitor-dependent
+  viewing preference and so deliberately stays out of the rig.
+  - The registry lives in `modules/shared/arm_props.py`, not in the module, so
+    a downstream file that links the rig keeps the data even with the
+    Expression Sheet module toggled off. Entries are keyed by bone NAME within
+    the same Object that owns the pose bones, so nothing crosses a datablock
+    boundary and library overrides need no pointer repair.
+  - `exp_index` itself is unchanged — still a raw pose-bone custom property at
+    `pose.bones["X"]["exp_index"]`, so every existing shader-node driver, action
+    and keyframe keeps working. Verified by a real link + override + save +
+    reload: keyed values persist and drive other datablocks correctly.
+  - **Known limitation:** an *unkeyed* `exp_index` edit on a library override
+    reverts to the library's value on reload, and the addon cannot prevent it —
+    Blender exposes no scriptable way to mark a nested custom property
+    library-overridable (`property_overridable_library_set` takes only
+    ID-level paths; `wm.properties_edit` is invoke-only). The per-bone picker
+    therefore always keys, and the panel warns when the armature is an
+    override. The manual fix is one tick of "Library Overridable" in the Edit
+    Property popup, per bone, in the source rig.
+  - New `Sync Expression Bones` operator migrates rigs built before the
+    registry: it registers every bone already carrying `exp_index`, normalises
+    the property's UI range to the bone's own grid, and reports entries whose
+    bone no longer exists rather than silently dropping them. Manual by design —
+    the earlier load-time auto-heal (`0a0f369`) shipped two regressions.
+  - See [docs/expression-bones-design.md](docs/expression-bones-design.md).
+
+### Removed (Sep 2026)
+- **Expression Sheet: the per-object sprite-cell selector** (`ops_cell.py`,
+  `gesturebone.spritesheet_select`, the `ob["spritesheet_index"]` property and
+  the scene-level `chosen_index` fallback). A leftover from the standalone
+  SpriteSheet script merged in `9bd8a1c`, it was never wired into the
+  bone/`exp_index` design: the value was written and read only by itself, with
+  no driver, node, bake or export consuming it. It also sat directly above the
+  bone's `exp_index` in the panel showing an unrelated number, which read as if
+  the two were the same thing.
+
 ### Changed (Aug 2026)
 - **Expression Sheet: Pose-mode expression-grid hotkey is now user-rebindable.**
   The grid still defaults to `E` in Pose Mode, but the Expression Sheet panel

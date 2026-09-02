@@ -29,6 +29,55 @@ def _bone_coll_search(self, context, edit_text):
     return [bc.name for bc in obj.data.collections if edit_text.lower() in bc.name.lower()]
 
 
+# ── Expression bones ───────────────────────────────────────────────────────────
+# Lives here rather than in modules/expression_sheet/props.py on purpose: this
+# is rig DATA, and `shared` is always registered while a module's own
+# props.register() does `del bpy.types.Scene...` on toggle-off. A downstream
+# file that links the rig with the Expression Sheet module disabled must not
+# lose the registry.
+#
+# The exp_index VALUE deliberately does not live here — it stays a raw
+# IDProperty on the pose bone (`pb["exp_index"]`), which is the data path every
+# existing shader-node driver already reads, and the only form that is both
+# freely keyable and drivable from other datablocks. This group holds only what
+# the picker needs. See docs/expression-bones-design.md.
+
+class GESTUREBONE_PG_ExpressionBone(bpy.types.PropertyGroup):
+    """One registered expression bone: which sheet it picks from, and how that
+    sheet is sliced for the picker."""
+
+    # `name` is what makes expression_bones["EXP-Eye.L"] resolve; kept equal to
+    # `bone` by the operators. `bone` is the one the code reads.
+    name: StringProperty(override={'LIBRARY_OVERRIDABLE'})
+    bone: StringProperty(
+        name="Bone",
+        description="Pose bone this entry drives (keyed by name — renaming the "
+                    "bone orphans the entry until you re-sync)",
+        override={'LIBRARY_OVERRIDABLE'},
+    )
+    sheet_image: PointerProperty(
+        name="Sheet",
+        description="Sprite sheet shown in this bone's picker grid",
+        type=bpy.types.Image,
+        override={'LIBRARY_OVERRIDABLE'},
+    )
+    grid_count: IntProperty(
+        name="Grid Count",
+        description="Cells per row/column on this bone's sheet. Picker only — "
+                    "the material's own UV grid math must match it",
+        default=4, min=2, max=8,
+        override={'LIBRARY_OVERRIDABLE'},
+    )
+    grid_size: IntProperty(
+        name="Cell Size",
+        description="Pixel size of each picker cell. 0 = use the scene default",
+        default=0, min=0, max=200,
+        override={'LIBRARY_OVERRIDABLE'},
+    )
+    ui_expanded: BoolProperty(name="Expanded", default=False,
+                              override={'LIBRARY_OVERRIDABLE'})
+
+
 # ── Property group ─────────────────────────────────────────────────────────────
 
 class GESTUREBONE_PG_ArmatureProps(bpy.types.PropertyGroup):
@@ -96,6 +145,16 @@ class GESTUREBONE_PG_ArmatureProps(bpy.types.PropertyGroup):
     show_generate_part: BoolProperty(name="Generate Part by Part", default=True, override={'LIBRARY_OVERRIDABLE'})
     show_debug_steps:   BoolProperty(name="Debug Steps",        default=False, override={'LIBRARY_OVERRIDABLE'})
 
+    # ── EXPRESSION SHEET: per-bone sprite sheets ──────────────────────────────
+    # USE_INSERTION so a downstream file can register NEW expression bones on
+    # an override, not just edit the ones the library shipped.
+    expression_bones: CollectionProperty(
+        type=GESTUREBONE_PG_ExpressionBone,
+        override={'LIBRARY_OVERRIDABLE', 'USE_INSERTION'},
+    )
+    active_expression_index: IntProperty(default=0, min=0,
+                                         override={'LIBRARY_OVERRIDABLE'})
+
     # ── GESTURE: back-pointer to the PLOTTING rig ─────────────────────────────
     plotting_rig: PointerProperty(
         name="Plotting Rig",
@@ -106,6 +165,7 @@ class GESTUREBONE_PG_ArmatureProps(bpy.types.PropertyGroup):
 
 
 def register():
+    bpy.utils.register_class(GESTUREBONE_PG_ExpressionBone)
     bpy.utils.register_class(GESTUREBONE_PG_ArmatureProps)
     bpy.types.Object.gesturebone_props = PointerProperty(type=GESTUREBONE_PG_ArmatureProps)
 
@@ -113,3 +173,4 @@ def register():
 def unregister():
     del bpy.types.Object.gesturebone_props
     bpy.utils.unregister_class(GESTUREBONE_PG_ArmatureProps)
+    bpy.utils.unregister_class(GESTUREBONE_PG_ExpressionBone)

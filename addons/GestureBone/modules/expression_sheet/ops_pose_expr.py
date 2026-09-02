@@ -11,6 +11,7 @@ Handles Blender <4.4 and 4.4+ layered actions when locating the fcurve.
 import bpy
 
 from .grid import _SpriteGridBase
+from .props import resolve_grid
 
 _EXP_PROP = "exp_index"   # custom int property on each pose bone
 
@@ -65,10 +66,31 @@ def _force_constant(fcurve):
         kp.interpolation = 'CONSTANT'
 
 
-def _ensure_exp_index(pose_bone):
-    """Ensure pose_bone has the exp_index custom property; return its value."""
+def _ensure_exp_index(pose_bone, max_index=None):
+    """Ensure pose_bone has the exp_index custom property; return its value.
+
+    Also refreshes the property's UI data (range, default, description) so the
+    N-panel slider clamps to the bone's own grid instead of the full int range.
+
+    What this deliberately does NOT do is mark the property library-overridable
+    — that is impossible from Python (see the module docstring note in
+    docs/expression-bones-design.md): property_overridable_library_set only
+    accepts paths directly on the ID, and wm.properties_edit is invoke-only.
+    Keyed values survive an override regardless, which is the workflow here.
+    """
     if _EXP_PROP not in pose_bone.keys():
         pose_bone[_EXP_PROP] = 0
+    try:
+        ui = pose_bone.id_properties_ui(_EXP_PROP)
+        ui.update(min=0, soft_min=0, default=0,
+                  description="Expression sprite cell index "
+                              "(UV order: 0 = bottom-left)",
+                  **({"max": max_index, "soft_max": max_index}
+                     if max_index is not None else {}))
+    except Exception:
+        # id_properties_ui refuses on a linked (non-editable) bone; the value
+        # still reads fine, and UI metadata is cosmetic.
+        pass
     return int(pose_bone[_EXP_PROP])
 
 
@@ -142,8 +164,14 @@ class GESTUREBONE_OT_PoseExpressionGrid(_SpriteGridBase):
             return False
         return any(pb.select for pb in obj.pose.bones)
 
-    def _grid_props(self, context):
-        return context.scene.gesturebone_spritesheet
+    def _grid_settings(self, context):
+        # The ACTIVE bone decides which sheet the grid shows. Multi-select
+        # still commits to every selected bone; mixing bones that use
+        # different sheets is the user's call, and the active one is the only
+        # unambiguous choice of what to draw.
+        arm = context.active_object
+        active_pb = context.active_pose_bone
+        return resolve_grid(arm, active_pb.name if active_pb else "", context)
 
     def _prepare(self, context):
         arm = context.active_object
@@ -159,15 +187,17 @@ class GESTUREBONE_OT_PoseExpressionGrid(_SpriteGridBase):
         # Ensure exp_index exists and any existing keys on these bones' channels
         # are (still) CONSTANT before we show the grid.
         for pb in self._bones:
-            _ensure_exp_index(pb)
+            _ensure_exp_index(pb, resolve_grid(arm, pb.name, context).max_index)
             _force_constant(_bone_exp_fcurve(arm, pb.name))
         return True
 
     def _seed_chosen(self, context):
-        props = context.scene.gesturebone_spritesheet
-        max_idx = props.grid_count ** 2 - 1
         active_pb = context.active_pose_bone
-        return min(_ensure_exp_index(active_pb), max_idx) if active_pb else -1
+        if not active_pb:
+            return -1
+        settings = resolve_grid(context.active_object, active_pb.name, context)
+        return min(_ensure_exp_index(active_pb, settings.max_index),
+                   settings.max_index)
 
     def _commit(self, context, idx):
         failed = _key_expression_change(context, self._arm, self._bones, idx)

@@ -1,13 +1,13 @@
 """
 expression_sheet/grid.py — shared GPU sprite-grid widget.
 
-Both tools in this module draw the *same* modal grid: a sprite sheet sliced
+Both pickers in this module draw the *same* modal grid: a sprite sheet sliced
 into ``grid_count**2`` square cells, placed at the mouse and picked by click.
-The sprite-cell selector (``ops_cell``) and the pose-expression picker
+The per-bone picker (``ops_expr_bones``) and the Pose-mode multi-bone picker
 (``ops_pose_expr``) were originally two standalone scripts that duplicated all
 of this code; it now lives here once. Subclasses of :class:`_SpriteGridBase`
-override only the three hooks that differ — which PropertyGroup holds the grid
-settings, how the initial highlight is seeded, and what a pick commits.
+override only the three hooks that differ — where the grid settings come from,
+how the initial highlight is seeded, and what a pick commits.
 """
 import bpy
 import blf
@@ -42,18 +42,22 @@ class _SpriteGridBase(bpy.types.Operator):
     Abstract — never registered directly. Subclasses supply ``bl_idname`` /
     ``bl_label`` and implement:
 
-    * ``_grid_props(context)``  -> PropertyGroup with grid_size/grid_count/sheet_image
-    * ``_seed_chosen(context)`` -> int   initial highlighted cell, or -1
-    * ``_commit(context, idx)`` -> None  apply the chosen cell index
+    * ``_grid_settings(context)`` -> props.GridSettings (cell_px, grid_count, image)
+    * ``_seed_chosen(context)``   -> int   initial highlighted cell, or -1
+    * ``_commit(context, idx)``   -> None  apply the chosen cell index
 
     Optionally ``_prepare(context) -> bool`` runs before the grid opens; return
     ``False`` to cancel.
+
+    ``_grid_settings`` returns a resolved snapshot rather than a PropertyGroup
+    because the settings no longer come from one place — a registered bone's
+    entry and the scene fallback are merged per call. See props.resolve_grid.
     """
     bl_options = {'REGISTER'}
 
     # ---- hooks (override) ----------------------------------------------
 
-    def _grid_props(self, context):
+    def _grid_settings(self, context):
         raise NotImplementedError
 
     def _seed_chosen(self, context):
@@ -96,11 +100,11 @@ class _SpriteGridBase(bpy.types.Operator):
         if not self._prepare(context):
             return {'CANCELLED'}
 
-        props = self._grid_props(context)
+        settings = self._grid_settings(context)
         ui = context.preferences.system.ui_scale
         self._ui   = ui
-        self._gc   = props.grid_count
-        self._cell = int(props.grid_size * ui)
+        self._gc   = settings.grid_count
+        self._cell = int(settings.cell_px * ui)
         self._pad  = int(6 * ui)
         self._gap  = int(2 * ui)
         side = (self._gc * self._cell
@@ -114,7 +118,7 @@ class _SpriteGridBase(bpy.types.Operator):
         y1 = max(side + 4, min(ry, self._region.height - 4))
         self._rect = (x1 - side, y1 - side, x1, y1)
 
-        img = props.sheet_image
+        img = settings.image
         self._tex    = gpu.texture.from_image(img) if img is not None else None
         self._chosen = self._seed_chosen(context)
         self._hover  = -1

@@ -36,6 +36,36 @@ def _get_fcurve_store(arm_obj):
     return None
 
 
+def _locked_flags(pose_bone, data_path):
+    """Per-component lock flags for a transform channel, in F-Curve array order."""
+    if data_path == "location":
+        return tuple(pose_bone.lock_location)
+    if data_path == "scale":
+        return tuple(pose_bone.lock_scale)
+    if data_path == "rotation_euler":
+        return tuple(pose_bone.lock_rotation)
+    # quaternion is (W, X, Y, Z), axis_angle is (angle, X, Y, Z) — slot 0 is lock_rotation_w
+    if data_path in {"rotation_quaternion", "rotation_axis_angle"}:
+        return (pose_bone.lock_rotation_w,) + tuple(pose_bone.lock_rotation)
+    return ()
+
+
+def _key_unlocked(pose_bone, data_path, frame):
+    """Key a transform channel component-by-component, skipping locked axes.
+
+    Keying the whole vector makes Blender attempt the locked components too; RNA
+    reports those as non-editable and Blender logs
+    "anim.action | WARNING Could not insert key into FCurve ...".
+    """
+    flags = _locked_flags(pose_bone, data_path)
+    if not any(flags):
+        pose_bone.keyframe_insert(data_path=data_path, frame=frame)
+        return
+    for index, locked in enumerate(flags):
+        if not locked:
+            pose_bone.keyframe_insert(data_path=data_path, index=index, frame=frame)
+
+
 def _apply_and_key_data(arm_obj, chain, frame, depsgraph):
     """Bake visual transform to local space and insert keyframes — no mode switching."""
     arm_eval = arm_obj.evaluated_get(depsgraph)
@@ -50,11 +80,11 @@ def _apply_and_key_data(arm_obj, chain, frame, depsgraph):
             from_space='POSE',
             to_space='LOCAL',
         )
-        pose_bone.keyframe_insert(data_path="location", frame=frame)
+        _key_unlocked(pose_bone, "location", frame)
         if pose_bone.rotation_mode == 'QUATERNION':
-            pose_bone.keyframe_insert(data_path="rotation_quaternion", frame=frame)
+            _key_unlocked(pose_bone, "rotation_quaternion", frame)
         elif pose_bone.rotation_mode == 'AXIS_ANGLE':
-            pose_bone.keyframe_insert(data_path="rotation_axis_angle", frame=frame)
+            _key_unlocked(pose_bone, "rotation_axis_angle", frame)
         else:
-            pose_bone.keyframe_insert(data_path="rotation_euler", frame=frame)
-        pose_bone.keyframe_insert(data_path="scale", frame=frame)
+            _key_unlocked(pose_bone, "rotation_euler", frame)
+        _key_unlocked(pose_bone, "scale", frame)

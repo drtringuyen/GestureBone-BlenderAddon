@@ -127,6 +127,40 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the current design.
   - Verified against the real `CHR_LittlePig.blend` production file on all
     5 existing node instances.
 
+- ⚠️ **Known-fixed-but-re-verify: file restart used to auto-scatter every UV
+  From Bone (Shared) instance's satellite nodes out of their Tidy frame.**
+  Root cause: `refresh_uv_from_bone_shared()` runs automatically on every
+  file load (the existing legacy-driver self-heal pass) and used to
+  unconditionally delete-then-recreate every Attribute feed node on every
+  call — including ones that needed no change at all. A freshly recreated
+  node has no `.parent`, so a satellite that had been grouped into its
+  owner's Tidy frame lost that grouping the moment the file was reopened;
+  worse, its position (computed from the owner's now-frame-relative
+  `.location`, but applied with no frame of its own to be relative *to*)
+  landed it in a completely different part of the canvas. `_ensure_attr_feed`
+  also reset `.location` unconditionally on every call, even when reusing an
+  existing node, so simply stopping the deletion alone wasn't sufficient.
+  - Fix: `_remove_attr_feeds()` now takes `keep_suffixes` and leaves the
+    CURRENT schema's own feed nodes completely untouched (only a genuinely
+    different schema's leftovers get swept); `_ensure_attr_feed()` only
+    re-parents/labels on every call but only sets `.location` at actual
+    creation time, never on reuse.
+  - **Verified this session** via repeated simulated reloads
+    (`migrate_legacy_drivers()` called 3× in a row against the live
+    `CHR_LittlePig.blend` file) — parent/position/hide state came back
+    byte-identical every time, driver targets and property values confirmed
+    correct, and a Shader Editor screenshot confirmed the visual result.
+  - **Not yet verified via an actual Blender close-and-reopen of a saved
+    file** — only via live in-memory simulation of the load-time self-heal
+    pass. A mid-session discovery this same day found that this addon's
+    hot-reload path can silently leave STALE BYTECODE running despite the
+    `.py` files on disk being current (see
+    [[blender-api-pitfalls]] item 8) — which invalidated some of this same
+    session's earlier "verified" claims until caught and corrected. Treat
+    this fix as strong-but-not-final until someone actually closes and
+    reopens a real `.blend` file with tidied nodes and confirms the layout
+    survives.
+
 ### Fixed (Aug 2026)
 - **Auto Rig broke on Blender 5.2 (GN modifier inputs moved off ID-properties)**:
   5.2 stopped exposing Geometry Nodes modifier inputs as plain ID-properties on

@@ -688,11 +688,23 @@ HIDDEN_SOCKETS = ("Amount", "Location", "Rotation", "Scale", "Mask Location",
                   "Exp Index In", "Bone UV", "Bone Scale", "Mask Sign")
 
 
-def _remove_attr_feeds(node):
+def _remove_attr_feeds(node, keep_suffixes=()):
+    """Sweep away this instance's Attribute feed nodes.
+
+    *keep_suffixes* -- normally the CURRENT schema's own suffixes -- are left
+    completely untouched rather than deleted-and-about-to-be-recreated:
+    _ensure_attr_feed already reuses a correctly-named/typed node in place,
+    so destroying it here first only forces a fresh .location every refresh
+    (including the automatic load-time self-heal every file open runs),
+    stomping any position the user or a Tidy pass gave it. Only feed nodes
+    from a genuinely DIFFERENT schema (e.g. v1 leftovers on a file that just
+    upgraded to v2) need sweeping here."""
     container = node.id_data
     if not _can_edit(container):
         return
     for suffix in ALL_ATTR_SUFFIXES:
+        if suffix in keep_suffixes:
+            continue
         attr = container.nodes.get(node.name + suffix)
         if attr is not None:
             try:
@@ -713,7 +725,8 @@ def _ensure_attr_feed(node, suffix, prop_key, wiring, y_offset, collapse=True):
         return
     attr_name = node.name + suffix
     attr = container.nodes.get(attr_name)
-    if attr is None or attr.bl_idname != 'ShaderNodeAttribute':
+    just_created = attr is None or attr.bl_idname != 'ShaderNodeAttribute'
+    if just_created:
         if attr is not None:
             try:
                 container.nodes.remove(attr)
@@ -721,8 +734,20 @@ def _ensure_attr_feed(node, suffix, prop_key, wiring, y_offset, collapse=True):
                 pass
         attr = container.nodes.new('ShaderNodeAttribute')
         attr.name = attr_name
+    # Keep it in step with the owner's frame -- node.location is relative to
+    # THIS parent, so reparenting before positioning (below, create-only) is
+    # what keeps the x/y_offset math correct instead of scattering the pill
+    # to a totally different part of the canvas the next time it needs
+    # recreating (e.g. a genuine schema change -- see _remove_attr_feeds).
+    if node.parent is not None:
+        attr.parent = node.parent
     attr.label = "{} for {}".format(prop_key.rsplit("::", 1)[-1], _instance_key_ident(node))
-    attr.location = (node.location.x - 240, node.location.y + y_offset)
+    # Position ONLY on actual creation -- an already-existing node (the
+    # normal case on every refresh, since _remove_attr_feeds no longer tears
+    # this down every call) keeps whatever position it already has, whether
+    # that's a user's manual arrangement or a Tidy pass's centered stack.
+    if just_created:
+        attr.location = (node.location.x - 240, node.location.y + y_offset)
     attr.attribute_type = 'OBJECT'
     attr.attribute_name = prop_key
     # Collapsed: the node shows nothing but a machine-generated property name,
@@ -760,14 +785,21 @@ def _ensure_uv_map_feed(node):
     uvmap = container.nodes.get(name)
     # Refresh the label every call (not just at creation) so a Tidy pass
     # (see _instance_key_ident) can relabel it even once it's already linked.
+    # Same for .parent -- keep it grouped with its owner's Tidy frame even on
+    # a call that doesn't recreate it (see the matching comment in
+    # _ensure_attr_feed for why a freshly recreated one needs this too).
     if uvmap is not None and uvmap.bl_idname == 'ShaderNodeUVMap':
         uvmap.label = "UV for " + _instance_key_ident(node)
+        if node.parent is not None:
+            uvmap.parent = node.parent
     if uv_in.links:
         return
     if uvmap is None or uvmap.bl_idname != 'ShaderNodeUVMap':
         uvmap = container.nodes.new('ShaderNodeUVMap')
         uvmap.name = name
         uvmap.label = "UV for " + _instance_key_ident(node)
+        if node.parent is not None:
+            uvmap.parent = node.parent
         uvmap.location = (node.location.x - 240, node.location.y - 200)
         # Leave uvmap.uv_map = "" -> Blender uses the active UV layer.
     container.links.new(uvmap.outputs['UV'], uv_in)
@@ -910,7 +942,6 @@ def refresh_uv_from_bone_shared(node):
 
     _clear_legacy_socket_drivers(node)
     _clear_instance_props_and_drivers(node)
-    _remove_attr_feeds(node)
 
     armature = node.armature_obj
     bone = node.bone_name
@@ -922,6 +953,20 @@ def refresh_uv_from_bone_shared(node):
     targets = _target_objects(node)
     if not targets:
         return  # no mesh uses this material (yet) -- nothing to drive
+
+    # Only torn down once we know a rebuild follows immediately below --
+    # _remove_attr_feeds used to run unconditionally up top, so a node with
+    # no target mesh yet (nothing wrong with it, just not assigned to any
+    # mesh in THIS file) had its feed nodes deleted on every refresh -- e.g.
+    # every file load's automatic self-heal pass -- and never rebuilt, since
+    # the "no targets" return above used to happen AFTER the deletion.
+    #
+    # keep_suffixes: the CURRENT schema's own feeds are left alone entirely
+    # (_ensure_attr_feed reuses them in place, preserving position/parent) --
+    # only a genuinely different schema's leftovers get swept here.
+    current_suffixes = {PACK_ATTR_SUFFIX, EXP_ATTR_SUFFIX} if version >= 2 \
+        else set(LEGACY_ATTR_SUFFIX.values())
+    _remove_attr_feeds(node, keep_suffixes=current_suffixes)
 
     if version >= 2:
         _build_drivers_v2(node, targets, armature, bone)

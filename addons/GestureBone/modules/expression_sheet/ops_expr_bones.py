@@ -20,8 +20,7 @@ from bpy.props import StringProperty, IntProperty, EnumProperty, BoolProperty
 from .grid import _SpriteGridBase
 from .props import find_entry, resolve_grid, scene_props
 from .ops_pose_expr import (
-    _EXP_PROP, _ensure_exp_index, _force_constant, _bone_exp_fcurve,
-    _key_expression_change, keying_blocked_reason,
+    _EXP_PROP, _ensure_exp_index, _key_expression_change,
 )
 
 
@@ -233,15 +232,9 @@ class GESTUREBONE_OT_expression_cell_pick(_SpriteGridBase):
                         % self.bone)
             return False
 
-        blocked = keying_blocked_reason(arm)
-        if blocked:
-            self.report({'ERROR'}, blocked)
-            return False
-
         self._arm = arm
         self._bones = [pb]
         _ensure_exp_index(pb, resolve_grid(arm, pb.name, context).max_index)
-        _force_constant(_bone_exp_fcurve(arm, pb.name))
         return True
 
     def invoke(self, context, event):
@@ -260,11 +253,7 @@ class GESTUREBONE_OT_expression_cell_pick(_SpriteGridBase):
         # unkeyed value silently reverts to the library's on reload (verified —
         # see docs/expression-bones-design.md), so writing without keying would
         # look like it worked and then lose the edit.
-        failed = _key_expression_change(context, self._arm, self._bones, idx)
-        if failed:
-            self.report({'ERROR'},
-                        "Could not key exp_index on '%s' — the action is not "
-                        "editable" % failed[0])
+        _key_expression_change(context, self._arm, self._bones, idx)
 
 
 _CLASSES = (

@@ -99,8 +99,12 @@ def keying_blocked_reason(arm_obj):
 
     A linked + library-overridden character usually still points at the
     library's own action, which is read-only. Blender then SKIPS keyframe
-    insertion with only a console warning ("not editable"), so the picked
-    expression silently fails to stick. Detect that up front and say so.
+    insertion with only a console warning ("not editable").
+
+    NOT called by the pickers any more — it used to gate the grid open and
+    refused to show it at all on a read-only action, which made E look dead.
+    Kept as a diagnostic helper for that case (see
+    docs/expression-bones-design.md).
     """
     ad = arm_obj.animation_data
     act = ad.action if ad else None
@@ -117,36 +121,22 @@ def keying_blocked_reason(arm_obj):
 
 
 def _key_expression_change(context, arm_obj, bones, new_idx):
-    """Apply *new_idx* to *bones*, keying a one-frame constant step.
+    """Apply *new_idx* to *bones*, keying it on the current frame only.
 
-    For each bone: if it already has keyframes on exp_index, key the previous
-    value one frame earlier, then key the new value on the current frame. If it
-    has never been keyed, just key the new value on the current frame.
-
-    Returns the names of bones whose keyframe insertion was refused (e.g. a
-    read-only action), so the caller can report instead of failing silently.
+    One key per bone, on ``frame_current``, nothing else touched. The channel
+    is CONSTANT, so a key at frame F already only takes effect from F onward
+    and the preceding key holds its own value up to it — the backfill key at
+    ``frame - 1`` this used to write bought nothing, and landed a spurious key
+    one frame back whenever the playhead sat on an existing key.
     """
     frame = context.scene.frame_current
-    failed = []
 
     for pb in bones:
-        prev_value = _ensure_exp_index(pb)
-        fcurve = _bone_exp_fcurve(arm_obj, pb.name)
-        has_existing_keys = fcurve is not None and len(fcurve.keyframe_points) > 0
-
-        if has_existing_keys:
-            # Hold the previous value one frame earlier.
-            pb[_EXP_PROP] = prev_value
-            pb.keyframe_insert(data_path=f'["{_EXP_PROP}"]', frame=frame - 1)
-
+        _ensure_exp_index(pb)
         pb[_EXP_PROP] = new_idx
-        if not pb.keyframe_insert(data_path=f'["{_EXP_PROP}"]', frame=frame):
-            failed.append(pb.name)
-
+        pb.keyframe_insert(data_path=f'["{_EXP_PROP}"]', frame=frame)
         # keyframe_insert can (re)create the fcurve — re-fetch, then normalize.
         _force_constant(_bone_exp_fcurve(arm_obj, pb.name))
-
-    return failed
 
 
 # ── Operator ──────────────────────────────────────────────────────────────────
@@ -179,16 +169,11 @@ class GESTUREBONE_OT_PoseExpressionGrid(_SpriteGridBase):
         self._bones = [pb for pb in arm.pose.bones if pb.select]
         if not self._bones:
             return False
-        blocked = keying_blocked_reason(arm)
-        if blocked:
-            # Don't open the grid just to drop the pick on the floor.
-            self.report({'ERROR'}, blocked)
-            return False
-        # Ensure exp_index exists and any existing keys on these bones' channels
-        # are (still) CONSTANT before we show the grid.
+        # Ensure exp_index exists and its UI range matches each bone's grid.
+        # Existing keys are deliberately left alone here — opening the picker
+        # (and pressing Esc) must not rewrite curves you never committed to.
         for pb in self._bones:
             _ensure_exp_index(pb, resolve_grid(arm, pb.name, context).max_index)
-            _force_constant(_bone_exp_fcurve(arm, pb.name))
         return True
 
     def _seed_chosen(self, context):
@@ -200,11 +185,7 @@ class GESTUREBONE_OT_PoseExpressionGrid(_SpriteGridBase):
                    settings.max_index)
 
     def _commit(self, context, idx):
-        failed = _key_expression_change(context, self._arm, self._bones, idx)
-        if failed:
-            self.report({'ERROR'},
-                        "Could not key exp_index on %d bone(s) (%s) — the action "
-                        "is not editable" % (len(failed), ", ".join(failed[:3])))
+        _key_expression_change(context, self._arm, self._bones, idx)
 
 
 _addon_keymaps = []

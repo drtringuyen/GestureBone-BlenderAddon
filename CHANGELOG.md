@@ -28,6 +28,24 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the current design.
   row; plotting shows a "Registration" box and a wide Auto Rig + icon cluster.
   Presentation-only; verified to draw on both Blender 5.1 and 5.2.
 
+### Changed (Sep 2026)
+- **Expression Sheet: picking a cell now keys the current frame only.** Both
+  pickers (the Pose-mode `E` grid and the per-bone panel picker) used to write
+  a second "backfill" key at `frame - 1` holding the previous value whenever
+  the bone already had `exp_index` keys. On a CONSTANT channel that key bought
+  nothing — the preceding key already holds its value up to the new one — and
+  when the playhead sat on an existing key it silently overwrote the key one
+  frame back. One pick is now one key, on `frame_current`.
+- **Expression Sheet: removed the picker guards that blocked or mutated.** The
+  `keying_blocked_reason()` pre-check refused to even open the grid on a
+  linked/read-only action (so `E` looked dead), and `_force_constant()` in
+  `_prepare` rewrote the interpolation of every existing key on the channel
+  just for opening the picker — including when it was then cancelled with Esc.
+  Both are gone; `_force_constant` still runs on commit so the new key stays a
+  hard step. `keying_blocked_reason()` remains defined as a diagnostic helper.
+  Trade-off: a read-only action now fails silently (Blender's console warning
+  only) instead of raising an operator error.
+
 ### Added (Sep 2026)
 - **Expression Sheet: per-bone sprite sheets ("Expression Bones").** The single
   scene-wide `Sheet` + `Cell N` pair is replaced by an explicit registry on the

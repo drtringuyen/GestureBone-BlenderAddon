@@ -154,7 +154,7 @@ running `override_hierarchy_create`, saving, and reopening.
 | Test | Result |
 |---|---|
 | Override inherits the **linked, read-only action** | ✗ `keyframe_insert` → `False`, "not editable" |
-| `keying_blocked_reason()` catches that case | ✓ already implemented, fires correctly |
+| `keying_blocked_reason()` catches that case | ✓ detects it correctly — but no longer called by the pickers (it used to refuse to open the grid, making `E` look dead); kept as a diagnostic helper |
 | After assigning a local action, key `exp_index` | ✓ |
 | Keyed values survive save + reload | ✓ f1 → 2, f10 → 6 |
 | Fcurve present on the override's local action | ✓ `pose.bones["EXP-Eye.L"]["exp_index"]` |

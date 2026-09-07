@@ -82,9 +82,13 @@ def _ensure_exp_index(pose_bone, max_index=None):
         pose_bone[_EXP_PROP] = 0
     try:
         ui = pose_bone.id_properties_ui(_EXP_PROP)
-        ui.update(min=0, soft_min=0, default=0,
+        # min/soft_min mirror max/soft_max negative: negative values are a real,
+        # meaningful mirror-flip flag (see project memory on exp_index), not an
+        # error state, so the N-panel slider must not clamp them to 0.
+        neg_bound = -max_index if max_index is not None else -(2 ** 31)
+        ui.update(min=neg_bound, soft_min=neg_bound, default=0,
                   description="Expression sprite cell index "
-                              "(UV order: 0 = bottom-left)",
+                              "(UV order: 0 = bottom-left; negative = mirrored flip)",
                   **({"max": max_index, "soft_max": max_index}
                      if max_index is not None else {}))
     except Exception:

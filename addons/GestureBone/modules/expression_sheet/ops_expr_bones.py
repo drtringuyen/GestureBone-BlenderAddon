@@ -36,7 +36,9 @@ def _armature(context):
 
 
 def _add_entry(arm, bone_name):
-    """Register *bone_name*, seeding the sheet from the scene fallback.
+    """Register *bone_name*, seeding sheet/grid/cell-size from the current
+    Sheet Defaults — an explicit snapshot the entry then owns and can diverge
+    from, not a live "0 = inherit" link to the scene.
 
     Returns the entry, or None if it was already registered.
     """
@@ -48,7 +50,7 @@ def _add_entry(arm, bone_name):
     scn = scene_props()
     entry.sheet_image = scn.sheet_image
     entry.grid_count = scn.grid_count
-    entry.grid_size = 0             # 0 = inherit the scene cell size
+    entry.grid_size = scn.grid_size
     return entry
 
 

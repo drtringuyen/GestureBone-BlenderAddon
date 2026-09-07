@@ -136,9 +136,10 @@ class GESTUREBONE_PT_ExpressionSheet(bpy.types.Panel):
 
             body.prop(entry, "sheet_image", text="Sheet")
             body.prop(entry, "flip_sheet_image", text="Flip Sheet")
+            # Cell Size left, Grid Count right — same order as Sheet Defaults.
             grid_row = body.row(align=True)
-            grid_row.prop(entry, "grid_count")
             grid_row.prop(entry, "grid_size")
+            grid_row.prop(entry, "grid_count")
 
             # Reordering is cosmetic (nothing reads the list order), so the
             # arrows live down here rather than competing with the bone name.

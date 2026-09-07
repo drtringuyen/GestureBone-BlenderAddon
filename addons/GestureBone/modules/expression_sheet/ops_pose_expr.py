@@ -154,7 +154,7 @@ def _key_expression_change(context, arm_obj, bones, new_idx):
     frame = context.scene.frame_current
 
     for pb in bones:
-        _ensure_exp_index(pb)
+        _ensure_exp_index(pb, resolve_grid(arm_obj, pb.name, context).max_index)
         pb[_EXP_PROP] = new_idx
         pb.keyframe_insert(data_path=f'["{_EXP_PROP}"]', frame=frame)
         # keyframe_insert can (re)create the fcurve — re-fetch, then normalize.

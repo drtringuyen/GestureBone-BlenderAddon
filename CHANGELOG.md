@@ -47,6 +47,19 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the current design.
   keyframe playback, and depsgraph evaluation on a negative `exp_index` all
   held their value in testing.
 
+### Fixed (Sep 2026, cont. 4)
+- **Expression Sheet: per-bone Cell Size / Grid Count row reordered to match
+  Sheet Defaults** (Cell Size left, Grid Count right — was reversed).
+- **New expression-bone entries now snapshot the current Sheet Defaults**
+  (`grid_size`/`grid_count`) instead of seeding `grid_size` with the `0 =
+  inherit scene default` placeholder — `_add_entry` (`ops_expr_bones.py`).
+- **Picking a cell no longer resets `exp_index`'s N-panel bounds to the full
+  int range.** `_key_expression_change` (`ops_pose_expr.py`) was calling
+  `_ensure_exp_index(pb)` with no `max_index` on every commit, undoing the
+  per-bone `±(grid_count**2 - 1)` clamp set by Add/Sync/opening the grid
+  right after the pick landed. Now resolves and passes the bone's own grid
+  settings on every commit, same as the other call sites.
+
 ### Added (Sep 2026, cont. 3)
 - **Expression Sheet: `exp_index` is now library-overridable, so a typed
   edit survives a linked-override reload, not just a keyed one.**

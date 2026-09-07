@@ -34,8 +34,8 @@ class GESTUREBONE_PT_ExpressionSheet(bpy.types.Panel):
         row = col.row(align=True)
         row.prop(props, "grid_size")
         row.prop(props, "grid_count")
-        col.prop(props, "sheet_image", text="Sheet")
-        col.prop(props, "flip_sheet_image", text="Flip Sheet")
+        col.template_ID(props, "sheet_image", open="image.open", text="Sheet")
+        col.template_ID(props, "flip_sheet_image", open="image.open", text="Flip Sheet")
 
         layout.separator()
 
@@ -134,8 +134,8 @@ class GESTUREBONE_PT_ExpressionSheet(bpy.types.Panel):
             if pb is None:
                 body.label(text="Bone missing — rename or re-sync", icon='ERROR')
 
-            body.prop(entry, "sheet_image", text="Sheet")
-            body.prop(entry, "flip_sheet_image", text="Flip Sheet")
+            body.template_ID(entry, "sheet_image", open="image.open", text="Sheet")
+            body.template_ID(entry, "flip_sheet_image", open="image.open", text="Flip Sheet")
             # Cell Size left, Grid Count right — same order as Sheet Defaults.
             grid_row = body.row(align=True)
             grid_row.prop(entry, "grid_size")

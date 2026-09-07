@@ -47,6 +47,14 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the current design.
   keyframe playback, and depsgraph evaluation on a negative `exp_index` all
   held their value in testing.
 
+### Added (Sep 2026, cont. 5)
+- **Expression Sheet: an "Open" file-browser button next to every Sheet /
+  Flip Sheet field.** `col.prop(...)` / `body.prop(...)` for `sheet_image`
+  and `flip_sheet_image` (Sheet Defaults and every per-bone entry) switched
+  to `template_ID(..., open="image.open")`, so an image can be loaded from
+  disk directly in the panel instead of only picking one already loaded
+  into the file.
+
 ### Fixed (Sep 2026, cont. 4)
 - **Expression Sheet: per-bone Cell Size / Grid Count row reordered to match
   Sheet Defaults** (Cell Size left, Grid Count right — was reversed).

@@ -47,6 +47,18 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the current design.
   keyframe playback, and depsgraph evaluation on a negative `exp_index` all
   held their value in testing.
 
+### Changed (Sep 2026, cont. 6)
+- **Expression Sheet: every Sheet / Flip Sheet row now follows one fixed
+  template** — label at 20% width, the image field at 50%, and the
+  fake-user/Open controls always icon-only, in both Sheet Defaults and
+  every per-bone entry. Replaced `template_ID(..., open="image.open")`
+  (added in cont. 5, below) with a hand-built row (`ui.py::_draw_sheet_row`)
+  plus a new `gesturebone.expression_image_open` operator
+  (`ops_expr_bones.py`) that does the same load-and-assign as the widget's
+  own Open button — `template_ID` only draws Open as an icon once an image
+  is already assigned, and widens to a text button otherwise, which made
+  the row's proportions state-dependent and inconsistent between rows.
+
 ### Added (Sep 2026, cont. 5)
 - **Expression Sheet: an "Open" file-browser button next to every Sheet /
   Flip Sheet field.** `col.prop(...)` / `body.prop(...)` for `sheet_image`

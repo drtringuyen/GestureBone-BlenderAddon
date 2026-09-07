@@ -34,8 +34,8 @@ class GESTUREBONE_PT_ExpressionSheet(bpy.types.Panel):
         row = col.row(align=True)
         row.prop(props, "grid_size")
         row.prop(props, "grid_count")
-        col.template_ID(props, "sheet_image", open="image.open", text="Sheet")
-        col.template_ID(props, "flip_sheet_image", open="image.open", text="Flip Sheet")
+        self._draw_sheet_row(col, props, "sheet_image", "Sheet", -1)
+        self._draw_sheet_row(col, props, "flip_sheet_image", "Flip Sheet", -1)
 
         layout.separator()
 
@@ -62,6 +62,36 @@ class GESTUREBONE_PT_ExpressionSheet(bpy.types.Panel):
         col = layout.column(align=True)
         col.label(text="Shader Editor > Add:", icon='NODETREE')
         col.label(text="- UV From Bone (Shared)", icon='UV')
+
+    # -- One Sheet / Flip Sheet field, fixed proportions -------------------
+
+    def _draw_sheet_row(self, layout, data, field, label, entry_index):
+        """label 20% / image field 50% / icon-only fake-user+Open buttons —
+        the same template for Sheet Defaults and every per-bone entry.
+
+        Built by hand rather than via ``template_ID(open=...)``: that widget
+        only draws Open as an icon once an image is already assigned — with
+        nothing assigned yet it draws a wide "Open" text button instead,
+        which breaks a fixed layout that has to look the same in both states.
+        ``gesturebone.expression_image_open`` (ops_expr_bones.py) is the same
+        load-and-assign behavior as an icon-only button.
+        """
+        row = layout.row(align=True)
+        label_split = row.split(factor=0.2, align=True)
+        label_split.label(text=label)
+        rest = label_split.row(align=True)
+        img_split = rest.split(factor=0.625, align=True)  # 0.625 of the remaining 80% = 50% of the row
+        img_split.prop(data, field, text="")
+
+        btn_row = rest.row(align=True)
+        img = getattr(data, field)
+        if img is not None:
+            btn_row.prop(img, "use_fake_user", text="",
+                        icon='FAKE_USER_ON' if img.use_fake_user else 'FAKE_USER_OFF')
+        op = btn_row.operator("gesturebone.expression_image_open", text="",
+                              icon='FILEBROWSER')
+        op.field = field
+        op.entry_index = entry_index
 
     # -- Expression bone registry ------------------------------------------
 
@@ -134,8 +164,8 @@ class GESTUREBONE_PT_ExpressionSheet(bpy.types.Panel):
             if pb is None:
                 body.label(text="Bone missing — rename or re-sync", icon='ERROR')
 
-            body.template_ID(entry, "sheet_image", open="image.open", text="Sheet")
-            body.template_ID(entry, "flip_sheet_image", open="image.open", text="Flip Sheet")
+            self._draw_sheet_row(body, entry, "sheet_image", "Sheet", i)
+            self._draw_sheet_row(body, entry, "flip_sheet_image", "Flip Sheet", i)
             # Cell Size left, Grid Count right — same order as Sheet Defaults.
             grid_row = body.row(align=True)
             grid_row.prop(entry, "grid_size")

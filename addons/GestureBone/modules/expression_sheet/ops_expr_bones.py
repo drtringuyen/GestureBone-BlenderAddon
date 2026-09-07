@@ -16,6 +16,7 @@ pointer repair — unlike the chain pointers riglinking/relink.py has to fix.
 """
 import bpy
 from bpy.props import StringProperty, IntProperty, EnumProperty, BoolProperty
+from bpy_extras.io_utils import ImportHelper
 
 from .grid import _SpriteGridBase
 from .props import find_entry, resolve_grid, scene_props
@@ -211,6 +212,53 @@ class GESTUREBONE_OT_expression_bone_sync(bpy.types.Operator):
         return {'FINISHED'}
 
 
+# ── Load-from-disk button for a Sheet / Flip Sheet field ─────────────────────
+#
+# template_ID(open=...) does this too, but only shows the Open button as an
+# icon once an image is already assigned — with nothing assigned it draws a
+# wide "Open" text button instead, which breaks the fixed label/image/icon
+# column layout the panel wants for every row regardless of state. This
+# operator is the same load-and-assign behavior as a plain icon-only button,
+# so the row can be built by hand at consistent proportions in ui.py.
+
+class GESTUREBONE_OT_expression_image_open(bpy.types.Operator, ImportHelper):
+    """Load an image file and assign it to this Sheet / Flip Sheet field"""
+    bl_idname = "gesturebone.expression_image_open"
+    bl_label = "Open Sheet Image"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    filter_glob: StringProperty(
+        default="*.png;*.jpg;*.jpeg;*.tga;*.bmp;*.tif;*.tiff;*.exr;*.hdr;*.webp",
+        options={'HIDDEN'},
+    )
+    # 'sheet_image' or 'flip_sheet_image' -- same field name on both the
+    # scene fallback PropertyGroup and GESTUREBONE_PG_ExpressionBone.
+    field: StringProperty(options={'SKIP_SAVE'})
+    # -1 = the scene Sheet Defaults; otherwise an index into
+    # arm.gesturebone_props.expression_bones on the active armature.
+    entry_index: IntProperty(default=-1, options={'SKIP_SAVE'})
+
+    def execute(self, context):
+        try:
+            img = bpy.data.images.load(self.filepath, check_existing=True)
+        except Exception as e:
+            self.report({'ERROR'}, "Could not load image: %s" % e)
+            return {'CANCELLED'}
+
+        if self.entry_index < 0:
+            data = scene_props(context)
+        else:
+            arm = _armature(context)
+            coll = arm.gesturebone_props.expression_bones if arm else None
+            if not coll or not (0 <= self.entry_index < len(coll)):
+                self.report({'ERROR'}, "Entry not found — panel may be stale")
+                return {'CANCELLED'}
+            data = coll[self.entry_index]
+
+        setattr(data, self.field, img)
+        return {'FINISHED'}
+
+
 # ── Per-bone cell picker ──────────────────────────────────────────────────────
 
 class GESTUREBONE_OT_expression_cell_pick(_SpriteGridBase):
@@ -263,6 +311,7 @@ _CLASSES = (
     GESTUREBONE_OT_expression_bone_remove,
     GESTUREBONE_OT_expression_bone_move,
     GESTUREBONE_OT_expression_bone_sync,
+    GESTUREBONE_OT_expression_image_open,
     GESTUREBONE_OT_expression_cell_pick,
 )
 

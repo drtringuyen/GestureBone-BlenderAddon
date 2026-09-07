@@ -47,6 +47,29 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the current design.
   keyframe playback, and depsgraph evaluation on a negative `exp_index` all
   held their value in testing.
 
+### Added (Sep 2026, cont. 3)
+- **Expression Sheet: `exp_index` is now library-overridable, so a typed
+  edit survives a linked-override reload, not just a keyed one.**
+  `_ensure_exp_index` (`ops_pose_expr.py`) now calls
+  `pose_bone.property_overridable_library_set('["exp_index"]', True)`
+  every time it runs (Add / Sync / opening the E-grid / the Cell picker).
+  `docs/expression-bones-design.md` had concluded this was impossible in
+  Blender 5.2, but that testing only tried
+  `ob.property_overridable_library_set('pose.bones["X"]["exp_index"]', ...)`
+  through the owning Object with the full nested path, which Blender
+  rejects as "not found" — calling it directly on the PoseBone struct with
+  a path relative to itself works. Verified with a full headless round trip
+  (separate background Blender process, not the live session): flagged the
+  property, linked the object into a fresh file, made a library override,
+  set an UNKEYED value on the override, saved, reopened — it held. A second
+  round trip confirmed the flag also works when set only on the
+  **downstream** override's own local bone (never touched in the source
+  library) — so existing rigs self-heal the next time Add/Sync/the picker
+  runs on them, no source-file edit required. The per-bone panel's linked-
+  override warning in `ui.py` was reworded from "type = lost on reload" to
+  a narrower "run Sync once" nudge for the one remaining case (a bone this
+  fix has never touched).
+
 ### Added (Sep 2026, cont. 2)
 - **Expression Sheet: per-bone "Flip Sheet" image, shown as an overlay while
   Shift is held.** `GESTUREBONE_PG_ExpressionBone` (and the scene-level

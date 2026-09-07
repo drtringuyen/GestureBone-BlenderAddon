@@ -83,16 +83,18 @@ class GESTUREBONE_PT_ExpressionSheet(bpy.types.Panel):
             layout.label(text="Select bones in Pose mode, then +", icon='INFO')
             return
 
-        # An unkeyed value on an override reverts to the library's on reload,
-        # and the addon cannot mark a pose-bone custom property overridable
-        # (Blender exposes no scriptable path — see the design doc). The picker
-        # below always keys; a value typed straight into the field does not, so
-        # say so rather than letting the edit quietly disappear.
+        # exp_index is flagged library-overridable by _ensure_exp_index (see
+        # ops_pose_expr.py) the first time Add/Sync/the E-grid/the Cell picker
+        # touches a bone, so a typed edit sticks across reload from then on.
+        # A bone this session hasn't touched yet (a very old entry, before
+        # this flag existed, on a file that hasn't run Sync since) may not
+        # have it set — nudge toward Sync rather than let a typed edit quietly
+        # disappear on reload in that one remaining case.
         if arm.override_library is not None:
             warn = layout.box().column(align=True)
-            warn.label(text="Linked override: type = lost on reload.",
-                       icon='ERROR')
-            warn.label(text="Use the Cell picker (it keys).")
+            warn.label(text="Linked override: run Sync once if a typed",
+                       icon='INFO')
+            warn.label(text="edit doesn't stick after reload.")
 
         for i, entry in enumerate(entries):
             pb = arm.pose.bones.get(entry.bone)

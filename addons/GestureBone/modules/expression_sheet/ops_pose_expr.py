@@ -70,16 +70,34 @@ def _ensure_exp_index(pose_bone, max_index=None):
     """Ensure pose_bone has the exp_index custom property; return its value.
 
     Also refreshes the property's UI data (range, default, description) so the
-    N-panel slider clamps to the bone's own grid instead of the full int range.
+    N-panel slider clamps to the bone's own grid instead of the full int range,
+    and marks the property library-overridable so a downstream file that links
+    this rig and makes a library override can edit exp_index directly (not just
+    through keyframes) and have it stick across a reload.
 
-    What this deliberately does NOT do is mark the property library-overridable
-    — that is impossible from Python (see the module docstring note in
-    docs/expression-bones-design.md): property_overridable_library_set only
-    accepts paths directly on the ID, and wm.properties_edit is invoke-only.
-    Keyed values survive an override regardless, which is the workflow here.
+    docs/expression-bones-design.md previously concluded this was impossible,
+    but that testing only tried it through the OWNING OBJECT with the full
+    nested path (`ob.property_overridable_library_set('pose.bones["X"]["exp_index"]', ...)`),
+    which Blender rejects as "not found". Calling it directly on the PoseBone
+    struct with a property path relative to itself (`pose_bone.property_overridable_library_set('["exp_index"]', True)`)
+    works. Verified with a full headless round trip (2026-09-07, Blender
+    5.2.1 LTS): flagged the property on a source-file bone, linked that
+    object into a fresh file, ran Make Library Override, set exp_index to an
+    UNKEYED static value on the override, saved, and reopened — the value
+    held. The flag on the IDProperty itself is what the override system
+    actually keys off; the "not found" path is an RNA path-resolution
+    quirk of the two-argument owning-ID form, not evidence the flag can't be
+    set at all.
     """
     if _EXP_PROP not in pose_bone.keys():
         pose_bone[_EXP_PROP] = 0
+    try:
+        pose_bone.property_overridable_library_set('["%s"]' % _EXP_PROP, True)
+    except Exception:
+        # Refuses on a bone that can't carry the flag (e.g. still resolving on
+        # file load) — keying still works regardless, just without the static
+        # unkeyed-edit convenience this unlocks.
+        pass
     try:
         ui = pose_bone.id_properties_ui(_EXP_PROP)
         # min/soft_min mirror max/soft_max negative: negative values are a real,

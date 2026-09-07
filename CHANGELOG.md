@@ -28,6 +28,25 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the current design.
   row; plotting shows a "Registration" box and a wide Auto Rig + icon cluster.
   Presentation-only; verified to draw on both Blender 5.1 and 5.2.
 
+### Added (Sep 2026, cont.)
+- **Expression Sheet: Shift+click a grid cell to flip the expression.** Both
+  pickers (the Pose-mode `E` grid and the per-bone panel picker) share the
+  same modal grid widget (`grid.py::_SpriteGridBase`); a plain click still
+  commits the clicked cell index as-is, but holding Shift commits its
+  negation instead, and an "Flipping Expression" label is drawn above the
+  grid while Shift is held so the mirrored pick is visible before you click.
+  Negative `exp_index` was already the established convention downstream —
+  the "UV From Bone (Shared)" geometry-node graph already takes `abs()` of
+  the index for the sprite lookup and switches on its sign to mirror the
+  instance scale — so this just exposes an existing convention as a picker
+  shortcut instead of requiring a manual N-panel edit to negate the value.
+  Verified end-to-end in a live Blender session: direct Python assignment,
+  keyframe insertion/eval, and the modal's sign-flip and label-draw code all
+  checked; the property's `id_properties_ui` hard `min=0` (kept for the
+  N-panel slider's clamp) does not clamp real writes — dict assignment,
+  keyframe playback, and depsgraph evaluation on a negative `exp_index` all
+  held their value in testing.
+
 ### Changed (Sep 2026)
 - **Expression Sheet: picking a cell now keys the current frame only.** Both
   pickers (the Pose-mode `E` grid and the per-bone panel picker) used to write

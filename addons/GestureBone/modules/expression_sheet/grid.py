@@ -122,6 +122,7 @@ class _SpriteGridBase(bpy.types.Operator):
         self._tex    = gpu.texture.from_image(img) if img is not None else None
         self._chosen = self._seed_chosen(context)
         self._hover  = -1
+        self._shift  = False
 
         self._handler = bpy.types.SpaceView3D.draw_handler_add(
             self._draw_px, (context,), 'WINDOW', 'POST_PIXEL')
@@ -143,6 +144,10 @@ class _SpriteGridBase(bpy.types.Operator):
         rx = event.mouse_x - self._region.x
         ry = event.mouse_y - self._region.y
 
+        if event.shift != self._shift:
+            self._shift = event.shift
+            self._region.tag_redraw()
+
         if event.type in {'MOUSEMOVE', 'INBETWEEN_MOUSEMOVE'}:
             hov = self._pick(rx, ry)
             if hov != self._hover:
@@ -153,7 +158,10 @@ class _SpriteGridBase(bpy.types.Operator):
         if event.type == 'LEFTMOUSE' and event.value == 'PRESS':
             idx = self._pick(rx, ry)
             if idx >= 0:
-                self._commit(context, idx)
+                # Shift+click flips the expression (mirrored sprite): the same
+                # cell index, negated, so downstream code can tell a mirrored
+                # pick from a plain one without a second custom property.
+                self._commit(context, -idx if event.shift else idx)
                 return self._finish(context)
             x0, y0, x1, y1 = self._rect
             if not (x0 <= rx <= x1 and y0 <= ry <= y1):
@@ -214,5 +222,13 @@ class _SpriteGridBase(bpy.types.Operator):
             elif idx == self._hover:
                 _border_rect(col_sh, cx0, cy0, cx1, cy1,
                              (1.0, 1.0, 1.0, 0.7), max(1, int(1 * self._ui)))
+
+        if self._shift:
+            txt = "Flipping Expression"
+            blf.size(0, int(14 * self._ui))
+            tw, th = blf.dimensions(0, txt)
+            blf.position(0, (x0 + x1) / 2 - tw / 2, y1 + int(6 * self._ui), 0)
+            blf.color(0, 1.0, 0.6, 0.2, 1.0)
+            blf.draw(0, txt)
 
         gpu.state.blend_set('NONE')

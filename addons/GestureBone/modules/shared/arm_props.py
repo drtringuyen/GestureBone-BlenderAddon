@@ -61,6 +61,13 @@ class GESTUREBONE_PG_ExpressionBone(bpy.types.PropertyGroup):
         type=bpy.types.Image,
         override={'LIBRARY_OVERRIDABLE'},
     )
+    flip_sheet_image: PointerProperty(
+        name="Flip Sheet",
+        description="Sprite sheet shown in the picker grid while Shift is held "
+                    "(mirrored-pose art). Falls back to Sheet when unset",
+        type=bpy.types.Image,
+        override={'LIBRARY_OVERRIDABLE'},
+    )
     grid_count: IntProperty(
         name="Grid Count",
         description="Cells per row/column on this bone's sheet. Picker only — "

@@ -47,6 +47,20 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the current design.
   keyframe playback, and depsgraph evaluation on a negative `exp_index` all
   held their value in testing.
 
+### Added (Sep 2026, cont. 2)
+- **Expression Sheet: per-bone "Flip Sheet" image, shown as an overlay while
+  Shift is held.** `GESTUREBONE_PG_ExpressionBone` (and the scene-level
+  fallback `GESTUREBONE_PG_Spritesheet`) gained `flip_sheet_image`, drawn as
+  a labeled field ("Sheet" / "Flip Sheet") below the existing sheet image in
+  both the per-bone panel and the Sheet Defaults box. `_SpriteGridBase`
+  (`grid.py`) now loads both textures and swaps which one it draws per-frame
+  based on `event.shift` — no flip sheet set falls back to the normal sheet,
+  so existing rigs render unchanged. The grid's caption above the popup was
+  changed from the Shift-only "Flipping Expression" label to always showing
+  state: "Normal Pose: Hold Shift to Flip the sprite" normally, "Flipped Pose"
+  while Shift is held. The Shift+click commit behavior (negating the picked
+  index) is unchanged — this only changes what image the picker previews.
+
 ### Changed (Sep 2026)
 - **Expression Sheet: picking a cell now keys the current frame only.** Both
   pickers (the Pose-mode `E` grid and the per-bone panel picker) used to write

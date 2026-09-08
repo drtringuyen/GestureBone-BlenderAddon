@@ -66,7 +66,7 @@ class GESTUREBONE_PT_ExpressionSheet(bpy.types.Panel):
     # -- One Sheet / Flip Sheet field, fixed proportions -------------------
 
     def _draw_sheet_row(self, layout, data, field, label, entry_index):
-        """label 20% / image field 50% / icon-only fake-user+Open buttons —
+        """label 20% / image field fills / icon-only fake-user+Open buttons —
         the same template for Sheet Defaults and every per-bone entry.
 
         Built by hand rather than via ``template_ID(open=...)``: that widget
@@ -80,11 +80,16 @@ class GESTUREBONE_PT_ExpressionSheet(bpy.types.Panel):
         label_split = row.split(factor=0.2, align=True)
         label_split.label(text=label)
         rest = label_split.row(align=True)
-        img_split = rest.split(factor=0.625, align=True)  # 0.625 of the remaining 80% = 50% of the row
-        img_split.prop(data, field, text="")
+        rest.prop(data, field, text="")
 
-        btn_row = rest.row(align=True)
+        # One ui_unit per icon button, so the cluster is exactly as wide as it
+        # draws and ends flush with the row: a percentage-split button column
+        # is wider than the icons, and the leftover trails off the right edge.
+        # The field takes whatever is left, so the Open icon stays right-
+        # aligned across rows whether or not the shield is there.
         img = getattr(data, field)
+        btn_row = rest.row(align=True)
+        btn_row.ui_units_x = 2.0 if img is not None else 1.0
         if img is not None:
             btn_row.prop(img, "use_fake_user", text="",
                         icon='FAKE_USER_ON' if img.use_fake_user else 'FAKE_USER_OFF')

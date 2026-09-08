@@ -28,6 +28,21 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the current design.
   row; plotting shows a "Registration" box and a wide Auto Rig + icon cluster.
   Presentation-only; verified to draw on both Blender 5.1 and 5.2.
 
+### Fixed (Sep 2026, cont. 7)
+- **Expression Sheet: Sheet / Flip Sheet rows no longer leave empty space
+  around their icons.** `ui.py::_draw_sheet_row` split the row's remainder
+  `0.625 / 0.375` but drew the image field into the first column only and
+  appended the icon cluster as a *sibling* of the split — so the unclaimed
+  second column showed as a gap between the field and the shield/Open icons.
+  Putting the icons in that column closed the gap but exposed a second one:
+  a percentage-width button column is wider than two icon buttons draw, so
+  the remainder trailed off the right end of the row. Both are gone now that
+  the field simply fills (`rest.prop(...)`) and the icon cluster is pinned to
+  `ui_units_x` — one unit per icon button, so it is exactly as wide as it
+  draws and the Open icon is right-flush on every row, with or without the
+  fake-user shield. The rows' right edge now lines up with the Cell Size /
+  Grid Count and `Cell N` rows below them.
+
 ### Added (Sep 2026, cont.)
 - **Expression Sheet: Shift+click a grid cell to flip the expression.** Both
   pickers (the Pose-mode `E` grid and the per-bone panel picker) share the

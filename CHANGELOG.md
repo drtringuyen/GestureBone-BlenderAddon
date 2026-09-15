@@ -28,6 +28,16 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the current design.
   row; plotting shows a "Registration" box and a wide Auto Rig + icon cluster.
   Presentation-only; verified to draw on both Blender 5.1 and 5.2.
 
+### Added (Sep 2026, cont. 8)
+- **Pose mode: Select Linked for CTRL bones.** `L` over a CTRL bone selects
+  every visible bone of the same `CTRL-{part}` group (`CTRL-Legs_0.End.L` →
+  all `CTRL-Legs*`), `Shift+L` deselects the group, `Ctrl+L` expands the
+  current selection. Both sides are selected by default; a *Same Side Only*
+  redo option keeps `.L`/`.R` apart (centre bones always included). Chain
+  `part_name`s are matched first so `Legs_Front` never collides with `Legs`.
+  Non-CTRL bones fall back to Blender's own select-linked. Also in the Pose
+  *Select* menu; the `L` hotkey is editable from the GESTURE rig panel.
+
 ### Fixed (Sep 2026, cont. 7)
 - **Expression Sheet: Sheet / Flip Sheet rows no longer leave empty space
   around their icons.** `ui.py::_draw_sheet_row` split the row's remainder

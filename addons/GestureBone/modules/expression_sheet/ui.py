@@ -91,8 +91,11 @@ class GESTUREBONE_PT_ExpressionSheet(bpy.types.Panel):
         btn_row = rest.row(align=True)
         btn_row.ui_units_x = 2.0 if img is not None else 1.0
         if img is not None:
-            btn_row.prop(img, "use_fake_user", text="",
-                        icon='FAKE_USER_ON' if img.use_fake_user else 'FAKE_USER_OFF')
+            # Always the OFF icon: ``use_fake_user`` is registered with
+            # consecutive icons, so Blender itself draws FAKE_USER_ON when the
+            # value is set. Passing FAKE_USER_ON here would make it draw the
+            # icon *after* that one in the enum instead of the checked shield.
+            btn_row.prop(img, "use_fake_user", text="", icon='FAKE_USER_OFF')
         op = btn_row.operator("gesturebone.expression_image_open", text="",
                               icon='FILEBROWSER')
         op.field = field

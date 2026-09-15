@@ -284,3 +284,33 @@ def _atomic_coll(props):
     """Template collection — prefers wip_token over atomic_chain."""
     name = props.wip_token if props.wip_token else props.atomic_chain
     return bpy.data.collections.get(name)
+
+
+# ── CTRL bone grouping (pose-mode Select Linked) ──────────────────────────────
+
+_CTRL_PREFIX = "CTRL-"
+_SIDE_RE     = re.compile(r'[._]h?([LR])$')
+
+
+def ctrl_group_key(bone_name, known_parts=()):
+    """Return the part name a CTRL bone belongs to, or None for non-CTRL bones.
+
+    CTRL bones share ``CTRL-{part}`` and then diverge:
+      CTRL-Legs_0 / CTRL-Legs_0.End.L / CTRL-Legs.Pivot / CTRL-Antena.L.003 → "Legs"/"Antena"
+    ``known_parts`` (chain part_names) is matched first, longest wins, so a part
+    like "Legs_Front" is not mistaken for "Legs". Otherwise the key is the text
+    before the first '_' or '.'.
+    """
+    if not bone_name.startswith(_CTRL_PREFIX):
+        return None
+    rest = _BLENDER_SUFFIX.sub('', bone_name[len(_CTRL_PREFIX):])
+    for part in sorted(filter(None, known_parts), key=len, reverse=True):
+        if rest == part or (rest.startswith(part) and rest[len(part)] in '_.'):
+            return part
+    return re.split(r'[._]', rest, maxsplit=1)[0] or None
+
+
+def ctrl_bone_side(bone_name):
+    """'L' / 'R' from a CTRL bone's trailing side token (.L, .R, .hL, .hR), else None."""
+    m = _SIDE_RE.search(_BLENDER_SUFFIX.sub('', bone_name))
+    return m.group(1) if m else None

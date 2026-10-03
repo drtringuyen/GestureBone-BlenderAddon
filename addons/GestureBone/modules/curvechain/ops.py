@@ -240,6 +240,7 @@ class GESTUREBONE_OT_CCRebuild(bpy.types.Operator):
         samplers = bd.samplers_of(arm, chain.part_name)
         if samplers:
             bd.bind_samplers(arm, chain.part_name, idx, samplers, bd.spacing_of(arm, chain.part_name))
+            bd.apply_layer_depth(arm, chain.part_name, chain.layer_depth)
         return {'FINISHED'}
 
 

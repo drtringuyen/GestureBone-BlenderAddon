@@ -510,6 +510,31 @@ def non_simple_drivers(arm):
             if fc.driver.type == 'SCRIPTED' and not fc.driver.is_simple_expression]
 
 
+def apply_layer_depth(arm, part, depth):
+    """Push a root-plane chain toward the camera along the plane normal,
+    ramping from 0 at its first sample to `depth` at its last, so where a
+    chain crosses itself (two legs passing) the later part draws in front
+    instead of sharing one depth with the earlier part. Writes the existing
+    CC_Plane / CC_EndPlane projections — no rebuild needed. Returns the number
+    of constraints set (0 = chain is not in root-plane mode)."""
+    samplers = samplers_of(arm, part)
+    n = len(samplers)
+    done = 0
+    for s, name in enumerate(samplers):
+        c = arm.pose.bones[name].constraints.get(TAG + "Plane")
+        if c is None:
+            continue
+        c.min_y = c.max_y = depth * (s / (n - 1) if n > 1 else 0.0)
+        done += 1
+    for pb in arm.pose.bones:
+        if pb.name.startswith((f"STR-{part}", f"AXIS-{part}")):
+            c = pb.constraints.get(TAG + "EndPlane")
+            if c is not None:
+                c.min_y = c.max_y = depth if "EndR" in pb.name else 0.0
+                done += 1
+    return done
+
+
 def samplers_of(arm, part):
     """Sampler bones of a chain, in chain order (from their radius carrier index)."""
     found = {}

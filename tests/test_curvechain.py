@@ -166,6 +166,22 @@ class TestCurveChain(unittest.TestCase):
             self.assertLess(abs((m.translation - root.translation).dot(n)), 1e-4, f"sample {k} off the root plane")
             self.assertAlmostEqual(abs(m.to_3x3().normalized().col[0].dot(n)), 1.0, places=3)
 
+    def test_layer_depth_ramps_toward_camera(self):
+        chain = self.ob.gesturebone_props.chains.add()
+        chain.part_name, chain.control_mode, chain.plane_space = PART, 'PT_3', 'ROOT'
+        chain.layer_depth = 0.05                       # live: update callback writes the constraints
+        bpy.context.view_layer.update()
+        P = self.ob.pose.bones; mw = self.ob.matrix_world
+        root = mw @ P[f"CTRL-{PART}.Rotation"].matrix
+        n = root.to_3x3().col[1].normalized()
+        depth = lambda k: ((mw @ P[f"STR-{PART}.{k:03d}"].matrix).translation - root.translation).dot(n)
+        self.assertAlmostEqual(depth(0), 0.0, places=5)
+        self.assertAlmostEqual(depth(N_SAMPLES - 1), 0.05, places=5)
+        self.assertAlmostEqual(depth(6), 0.025, places=5)
+        chain.layer_depth = 0.0
+        bpy.context.view_layer.update()
+        self.assertAlmostEqual(depth(N_SAMPLES - 1), 0.0, places=5)
+
     def test_rig_type_enum_keeps_saved_indices(self):
         items = [i.identifier for i in bpy.types.Object.bl_rna.properties["gesturebone_props"]
                  .fixed_type.properties["rig_type"].enum_items]

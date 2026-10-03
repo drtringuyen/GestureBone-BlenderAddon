@@ -136,6 +136,18 @@ def _on_handle_smoothness_update(self, context):
             break
 
 
+def _on_layer_depth_update(self, context):
+    arm = self.id_data
+    if getattr(arm, "type", None) != 'ARMATURE':
+        return
+    try:
+        from ..curvechain.builder import apply_layer_depth
+    except ImportError:
+        return
+    apply_layer_depth(arm, self.part_name, self.layer_depth)
+    arm.update_tag()
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _resize_collection(coll, count):
@@ -265,6 +277,16 @@ class GESTUREBONE_PG_ChainDefinition(bpy.types.PropertyGroup):
             ('ARMATURE', "Armature", "Fixed armature front plane (-Y), like the old Geometry Nodes rig"),
         ],
         default='ROOT',
+        override={'LIBRARY_OVERRIDABLE'},
+    )
+
+    layer_depth: FloatProperty(
+        name="Layer Depth",
+        description="Root Bone plane only: push the chain toward the camera, from 0 at its first point to "
+                    "this distance at its last, so where the chain crosses itself (legs passing) the later "
+                    "part draws in front instead of cutting through",
+        default=0.0, soft_min=-0.1, soft_max=0.1, step=0.1, precision=3, subtype='DISTANCE',
+        update=lambda self, ctx: _on_layer_depth_update(self, ctx),
         override={'LIBRARY_OVERRIDABLE'},
     )
 

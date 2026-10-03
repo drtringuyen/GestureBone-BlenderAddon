@@ -63,6 +63,8 @@ def draw_unified_ui(layout, context, arm):
         r = body.row(align=True)
         r.prop(chain, "plane_space", text="")
         r.operator("gesturebone.cc_rebuild", text="", icon='FILE_REFRESH').part_name = part
+        if chain.plane_space == 'ROOT':
+            body.prop(chain, "layer_depth", text="Layer Depth")
         info = body.row()
         info.enabled = False
         info.label(text=f"{len(bd.chain_indices(chain))} points · layer {fit.layer_name(part)}")

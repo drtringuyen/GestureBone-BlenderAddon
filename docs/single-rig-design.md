@@ -127,19 +127,36 @@ Old vs. converted, over every frame from 0 to 50:
 |---|---|---|---|
 | Body | 0.01 / 0.01 mm | 0 / 0° | 0.02 mm |
 | Tail | 0.002 / 0.003 mm | 0 / 0° | 0.004 mm |
-| Arm.L | 0.13 / 0.38 mm | 2.7 / 5.0° | 1.4 mm |
-| Leg.L | 0.16 / 0.50 mm | 3.6 / 7.7° | 1.3 mm |
-| Leg.R | 0.22 / 0.97 mm | 2.1 / 5.2° | 1.3 mm |
-| Arm.R | 0.71 / 2.3 mm | 3.5 / 33° | 10.9 mm |
+| Arm.L | 0.13 / 0.38 mm | 0.13 / 0.47° | 0.46 mm |
+| Leg.L | 0.16 / 0.50 mm | 0.13 / 0.73° | 0.23 mm |
+| Leg.R | 0.22 / 0.97 mm | 0.21 / 1.6° | 0.50 mm |
+| Arm.R | 0.71 / 2.3 mm | 0.39 / 7.9° | 3.3 mm |
 
-The remaining rotation difference has two causes:
+The remaining Arm.R difference is at frames 38–40. The arm points almost
+straight into the view axis there (|Y·n| = 0.95), so the old and new
+up-vectors are both undefined.
 
-- **Chord vs. true tangent.** The GN resampled to a polyline, so a sample's
-  "tangent" was the chord to its neighbours. The B-Bone gives the true
-  tangent. They differ where a short handle bends the curve sharply.
-- **Arm.R at frames 38–40.** The arm points almost straight into the view
-  axis (|Y·n| = 0.95), so the old and new up-vectors are both undefined
-  there.
+### Sample direction: chord bisector, not the true tangent
+
+The GN resampled the curve to a polyline, so each sample's "tangent" was the
+bisector of the two chords to its neighbours. A first version used the
+B-Bone's exact tangent instead. Where short handles make a sharp corner, that
+tangent snaps up to ~155° between two samples and folds a thick band inward:
+CHR_RU's hip showed 24 flipped faces, against 0 on the old rig. Now each
+sample's position lives on a hidden `MCH-{part}.pos_{s}` helper. The sampler
+copies that position, Damped-Tracks the next helper, then Damped-Tracks away
+from the previous helper at 50 % influence. That gives the same bisector,
+with no dependency cycle. On the CHR_RU hip pose, the turns per sample are
+61.9° / 71.6° (old rig: 60.0° / 73.3°).
+
+### Layer Depth (Root Bone plane)
+
+Projection makes a chain exactly coplanar, so where it overlaps itself the
+faces z-fight. That shows up as two legs passing each other, or both feet
+together giving a dark notch. `layer_depth` (default 1 cm) ramps the
+samplers and end bones toward the camera along the plane normal, from 0 at
+the first point to the full value at the last. It's a live slider and needs
+no rebuild.
 
 Speed and linking:
 
@@ -168,9 +185,6 @@ and the end-to-end test gives identical results on 5.1.2 and 5.2.2.
 - **Old curves on Auto Rig.** On LittlePig, Auto Rig + Single Rig left the
   *original* `CHR_LittlePig-*` curves in place, because `clear_rig` doesn't
   remove them. The old pipeline does the same.
-- **No chord-tangent mode yet.** The converter has no option to reproduce
-  the GN's chord tangents exactly. Add one if the arm/leg rotation
-  differences are visible in shots.
 - **Not exercised yet:** `plane_space='ROOT'` on existing animation (the tilt
   of the `.Rotation` bones becomes visible), the 3D toggle, and PT_2 chains.
 - **Bone count.** The armature is larger (961 bones on LittlePig). Two ways

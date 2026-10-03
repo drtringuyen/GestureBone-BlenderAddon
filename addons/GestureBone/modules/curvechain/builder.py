@@ -57,6 +57,7 @@ def cmp_tip_name(part, k):  return f"MCH-{part}.SEG_{k}.cmp.tip"
 def q_name(part, k, j):     return f"MCH-{part}.SEG_{k}.q{j}"
 def up_name(part):          return f"MCH-{part}.Up"
 def rad_name(part, s):      return f"MCH-{part}.rad_{s:02d}"
+def pos_name(part, s):      return f"MCH-{part}.pos_{s:02d}"
 def root_candidates(part):  return (f"CTRL-{part}.Rotation", f"CTRL-{part}.Pivot")
 LEN_PROP = "cc_len"
 
@@ -359,7 +360,15 @@ def bind_samplers(arm, part, indices, samplers, spacing='UNIFORM', facing=None):
     spans. Replaces GEOMETRY_ATTRIBUTE / earlier CC_ constraints in place, so a
     trailing Limit Scale or Stretch To keeps running after them.
 
-    facing: {sampler: 'TRACK_X' | 'TRACK_NEGATIVE_X'} — which side of the plane
+    Positions live on hidden helpers MCH-{part}.pos_{s} (spread evenly by arc
+    length over the spans). Each sampler copies its helper's location and aims
+    halfway between "toward the next helper" and "away from the previous one"
+    -- the bisector of the two neighbouring chords, which is exactly the
+    tangent the old GN rig got from its resampled polyline. The analytic curve
+    tangent snaps up to ~150 degrees between two samples at a sharp corner and
+    folds a thick band; the chord bisector spreads that turn like the old rig.
+
+    facing: {sampler: 'TRACK_X' | 'TRACK_NEGATIVE_X'} -- which side of the plane
     each sampler's X faces. The converter measures it from the old GN result;
     rest frames can NOT tell (LittlePig's right-side chains rest at +Y but the
     GN drove them to -Y). Missing entries keep an existing CC_Up's setting,
@@ -377,13 +386,17 @@ def bind_samplers(arm, part, indices, samplers, spacing='UNIFORM', facing=None):
         ebs = arm.data.edit_bones
         for s, name in enumerate(samplers):
             src = ebs[name]
-            r = ebs.get(rad_name(part, s)) or ebs.new(rad_name(part, s))
-            r.head = src.head; r.tail = src.head + Vector((0, 0, max(src.length * 0.2, 1e-3)))
-            r.parent = None; r.use_deform = False
+            for helper in (rad_name(part, s), pos_name(part, s)):
+                r = ebs.get(helper) or ebs.new(helper)
+                r.head = src.head
+                r.tail = src.head + Vector((0, 0, max(src.length * 0.2, 1e-3)))
+                r.parent = None
+                r.use_deform = False
     finally:
         _set_mode(arm, 'POSE')
     coll = arm.data.collections.get(MCH_COLLECTION) or arm.data.collections.new(MCH_COLLECTION)
     remove_drivers(arm, f"MCH-{part}.rad_")
+    remove_drivers(arm, f"MCH-{part}.pos_")
     for name in samplers:
         remove_drivers(arm, name + '"]')
 
@@ -391,27 +404,27 @@ def bind_samplers(arm, part, indices, samplers, spacing='UNIFORM', facing=None):
     slots = fixed_slots(arm, part, indices, count)
     pbs = arm.pose.bones
     report = []
-    # 'ROOT' plane (Up parented to the chain root): also PROJECT every sampler
+    # 'ROOT' plane (Up parented to the chain root): also PROJECT every sample
     # onto the root bone's plane, so the deform chain lies flat on it even when
     # a control drifts off-plane. 'ARMATURE' keeps the old GN behaviour (no
     # projection) for converted rigs.
     up_b = arm.data.bones.get(up_name(part))
     project = root is not None and up_b is not None and up_b.parent is not None and up_b.parent.name == root
-    for s, name in enumerate(samplers):
-        pb = pbs[name]
-        slot = next((i for i, c in enumerate(pb.constraints)
-                     if c.type == 'GEOMETRY_ATTRIBUTE' or c.name.startswith(TAG)), 0)
-        _clear_tagged(pb, also_types=('GEOMETRY_ATTRIBUTE',))
+
+    # 1. position helpers
+    for s in range(count):
+        hp = pbs[pos_name(part, s)]
+        for cc in list(hp.constraints):
+            hp.constraints.remove(cc)
+        coll.assign(hp.bone)
         u = s / (count - 1) if count > 1 else 0.0
-        new = []
         if spacing == 'UNIFORM':
             X = f"{u:.9g} * ({' + '.join(lens)})"
             for k in range(nspan):
-                c = _con(pb, 'COPY_TRANSFORMS', f"{TAG}Sample_{k}", arm, seg_name(part, k),
+                c = _con(hp, 'COPY_LOCATION', f"{TAG}Sample_{k}", arm, seg_name(part, k),
                          head_tail=0.0, use_bbone_shape=True)
-                new.append(c)
                 C = " + ".join(lens[:k]) or "0"
-                path = f'pose.bones["{name}"].constraints["{c.name}"]'
+                path = f'pose.bones["{hp.name}"].constraints["{c.name}"]'
                 _, drv = _driver(arm, path + ".head_tail")
                 for kk in range(nspan):
                     _v_prop(drv, f"L{kk}", arm, f'pose.bones["{seg_name(part, kk)}"]["{LEN_PROP}"]')
@@ -423,39 +436,52 @@ def bind_samplers(arm, part, indices, samplers, spacing='UNIFORM', facing=None):
                     drv.expression = f"min(max(({X} - ({C})) * 1e9, 0), 1)"
         else:
             k, ht = slots[s]
-            new.append(_con(pb, 'COPY_TRANSFORMS', f"{TAG}Sample_{k}", arm, seg_name(part, k),
-                            head_tail=ht, use_bbone_shape=True))
+            _con(hp, 'COPY_LOCATION', f"{TAG}Sample_{k}", arm, seg_name(part, k),
+                 head_tail=ht, use_bbone_shape=True)
         if project:
             # root bones point along the plane normal: their local Y is it
-            new.append(_con(pb, 'LIMIT_LOCATION', TAG + "Plane", None, "",
-                            owner_space='CUSTOM', space_object=arm, space_subtarget=root,
-                            use_min_y=True, use_max_y=True, min_y=0.0, max_y=0.0,
-                            use_transform_limit=False))
+            _con(hp, 'LIMIT_LOCATION', TAG + "Plane", None, "",
+                 owner_space='CUSTOM', space_object=arm, space_subtarget=root,
+                 use_min_y=True, use_max_y=True, min_y=0.0, max_y=0.0, use_transform_limit=False)
+
+    # 2. samplers: position + chord-bisector direction + up + radius
+    for s, name in enumerate(samplers):
+        pb = pbs[name]
+        slot = next((i for i, c in enumerate(pb.constraints)
+                     if c.type == 'GEOMETRY_ATTRIBUTE' or c.name.startswith(TAG)), 0)
+        _clear_tagged(pb, also_types=('GEOMETRY_ATTRIBUTE',))
+        new = [_con(pb, 'COPY_LOCATION', TAG + "Pos", arm, pos_name(part, s))]
+        if s < count - 1:
+            new.append(_con(pb, 'DAMPED_TRACK', TAG + "Next", arm, pos_name(part, s + 1),
+                            track_axis='TRACK_Y'))
+        if s > 0:
+            new.append(_con(pb, 'DAMPED_TRACK', TAG + "Prev", arm, pos_name(part, s - 1),
+                            track_axis='TRACK_NEGATIVE_Y', influence=0.5 if s < count - 1 else 1.0))
         new.append(_con(pb, 'LOCKED_TRACK', TAG + "Up", arm, up_name(part),
                         lock_axis='LOCK_Y', track_axis=facing.get(name, 'TRACK_X')))
-        c = _con(pb, 'TRANSFORM', TAG + "Radius", arm, rad_name(part, s),
-                 target_space='POSE', owner_space='POSE', map_from='SCALE', map_to='SCALE',
-                 map_to_x_from='Y', map_to_y_from='Y', map_to_z_from='Y',
-                 from_min_y_scale=0.0, from_max_y_scale=1.0,
-                 to_min_x_scale=0.0, to_min_y_scale=0.0, to_min_z_scale=0.0,
-                 to_max_x_scale=1.0, to_max_y_scale=1.0, to_max_z_scale=1.0,
-                 mix_mode_scale='REPLACE', use_motion_extrapolate=True)
-        new.append(c)
+        new.append(_con(pb, 'TRANSFORM', TAG + "Radius", arm, rad_name(part, s),
+                        target_space='POSE', owner_space='POSE', map_from='SCALE', map_to='SCALE',
+                        map_to_x_from='Y', map_to_y_from='Y', map_to_z_from='Y',
+                        from_min_y_scale=0.0, from_max_y_scale=1.0,
+                        to_min_x_scale=0.0, to_min_y_scale=0.0, to_min_z_scale=0.0,
+                        to_max_x_scale=1.0, to_max_y_scale=1.0, to_max_z_scale=1.0,
+                        mix_mode_scale='REPLACE', use_motion_extrapolate=True))
         for off, c in enumerate(new):
             pb.constraints.move(list(pb.constraints).index(c), slot + off)
         if project:
             # the rig's own trailing Stretch To (end caps aim at their End
             # handle, which may sit off the plane) is left as is; after it,
             # put X back on the plane normal and turn Y only about that normal
-            # toward the target — the end cap still aims at its handle, flat.
-            stretch = next((c for c in pb.constraints if c.type == 'STRETCH_TO' and not c.name.startswith(TAG)), None)
+            # toward the target -- the end cap still aims at its handle, flat.
+            stretch = next((c for c in pb.constraints
+                            if c.type == 'STRETCH_TO' and not c.name.startswith(TAG)), None)
             if stretch is not None and stretch.subtarget:
                 _con(pb, 'DAMPED_TRACK', TAG + "EndUp", arm, up_name(part),
                      track_axis=facing.get(name, 'TRACK_X'))
                 _con(pb, 'LOCKED_TRACK', TAG + "EndAim", arm, stretch.subtarget,
                      lock_axis='LOCK_X', track_axis='TRACK_Y')
 
-        # radius carrier: r = r0 + Σ (r_k+1 - r_k) * t_k   (t_k clamped span param)
+        # radius carrier: r = r0 + sum((r_k+1 - r_k) * t_k)   (t_k clamped span param)
         rp = pbs[rad_name(part, s)]
         for cc in list(rp.constraints):
             rp.constraints.remove(cc)
@@ -464,15 +490,16 @@ def bind_samplers(arm, part, indices, samplers, spacing='UNIFORM', facing=None):
         for n, i in enumerate(indices):
             _v_scale_y(drv, f"r{n}", arm, scale_name(part, i))
         if spacing == 'UNIFORM':
-            # t_k is already computed by the sample constraints' own head_tail
-            # drivers — read it back instead of repeating it (driver expressions
-            # are capped at 255 characters)
+            # t_k is already computed by the helper's own head_tail drivers --
+            # read it back instead of repeating it (expressions cap at 255 chars)
             for kk in range(nspan):
-                _v_prop(drv, f"t{kk}", arm, f'pose.bones["{name}"].constraints["{TAG}Sample_{kk}"].head_tail')
+                _v_prop(drv, f"t{kk}", arm,
+                        f'pose.bones["{pos_name(part, s)}"].constraints["{TAG}Sample_{kk}"].head_tail')
             terms = [f"(r{k + 1} - r{k}) * t{k}" for k in range(nspan)]
         else:
             k0, ht = slots[s]
-            terms = [f"(r{k + 1} - r{k}) * {1.0 if k < k0 else (ht if k == k0 else 0.0)!r}" for k in range(nspan)]
+            terms = [f"(r{k + 1} - r{k}) * {1.0 if k < k0 else (ht if k == k0 else 0.0)!r}"
+                     for k in range(nspan)]
         drv.expression = "r0 + " + " + ".join(terms)
         report.append(name)
     _project_end_bones(arm, part, root, project)
@@ -521,7 +548,8 @@ def apply_layer_depth(arm, part, depth):
     n = len(samplers)
     done = 0
     for s, name in enumerate(samplers):
-        c = arm.pose.bones[name].constraints.get(TAG + "Plane")
+        hp = arm.pose.bones.get(pos_name(part, s))
+        c = hp.constraints.get(TAG + "Plane") if hp is not None else None
         if c is None:
             continue
         c.min_y = c.max_y = depth * (s / (n - 1) if n > 1 else 0.0)
@@ -547,7 +575,9 @@ def samplers_of(arm, part):
 
 
 def spacing_of(arm, part):
-    for name in samplers_of(arm, part)[:1]:
-        n = sum(1 for c in arm.pose.bones[name].constraints if c.name.startswith(TAG + "Sample_"))
-        return 'UNIFORM' if n > 1 else 'FIXED'
-    return 'UNIFORM'
+    hp = arm.pose.bones.get(pos_name(part, 0))
+    owner = hp if hp is not None else next((arm.pose.bones[n] for n in samplers_of(arm, part)[:1]), None)
+    if owner is None:
+        return 'UNIFORM'
+    n = sum(1 for c in owner.constraints if c.name.startswith(TAG + "Sample_"))
+    return 'UNIFORM' if n > 1 else 'FIXED'

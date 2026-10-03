@@ -443,6 +443,12 @@ def bind_samplers(arm, part, indices, samplers, spacing='UNIFORM', facing=None):
         new.append(c)
         for off, c in enumerate(new):
             pb.constraints.move(list(pb.constraints).index(c), slot + off)
+        if project:
+            # the rig's own trailing Stretch To (end caps aim at their End
+            # handle) must not roll the bone off the plane
+            for c in pb.constraints:
+                if c.type == 'STRETCH_TO' and not c.name.startswith(TAG):
+                    c.keep_axis = 'PLANE_X'
 
         # radius carrier: r = r0 + Σ (r_k+1 - r_k) * t_k   (t_k clamped span param)
         rp = pbs[rad_name(part, s)]

@@ -56,6 +56,15 @@ def frame_for(layer, frame):
     return best
 
 
+def clear_frame(scene, part, fr):
+    """Drop this chain's strokes on one annotation frame. Removes the whole
+    frame: the layer belongs to the chain, and Blender 5.1's stroke collection
+    has no remove() (5.2 added it)."""
+    lay = chain_layer(scene, part)
+    if lay is not None and fr is not None:
+        lay.frames.remove(fr)
+
+
 def latest_stroke(scene, part, frame):
     lay = chain_layer(scene, part)
     if lay is None:

@@ -70,7 +70,4 @@ def draw_unified_ui(layout, context, arm):
 
 def draw_convert_box(layout, arm):
     """Offer the conversion on a classic GESTURE rig."""
-    box = layout.box()
-    row = box.row(align=True)
-    row.label(text="Single rig (no curves / GN)", icon='EXPERIMENTAL')
-    row.operator("gesturebone.cc_convert", text="Convert", icon='AUTOMERGE_ON')
+    layout.operator("gesturebone.cc_convert", text="Convert to Single Rig", icon='AUTOMERGE_ON')

@@ -118,7 +118,8 @@ class GESTUREBONE_OT_CCApply(bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     part_name: StringProperty()
-    clear_stroke: BoolProperty(name="Clear Stroke", default=True)
+    clear_stroke: BoolProperty(name="Clear Stroke", default=True,
+                               description="Remove the chain's strokes on this frame after applying")
     auto_direction: BoolProperty(name="Auto Direction", default=True,
                                  description="Start the chain at whichever stroke end is nearer its first point")
 
@@ -145,7 +146,7 @@ class GESTUREBONE_OT_CCApply(bpy.types.Operator):
             self.report({'ERROR'}, str(e))
             return {'CANCELLED'}
         if self.clear_stroke:
-            fr.strokes.remove(stroke)
+            fit.clear_frame(context.scene, chain.part_name, fr)
         chain.is_drawing = False
         self.report({'INFO'}, f"'{chain.part_name}' keyed on frame {rep['frame']}"
                               + (" (stroke reversed)" if rep["reversed"] else ""))
@@ -182,8 +183,7 @@ class GESTUREBONE_OT_CCClear(bpy.types.Operator):
         fr, _ = fit.latest_stroke(context.scene, self.part_name, context.scene.frame_current)
         if fr is None:
             return {'CANCELLED'}
-        for s in list(fr.strokes):
-            fr.strokes.remove(s)
+        fit.clear_frame(context.scene, self.part_name, fr)
         return {'FINISHED'}
 
 

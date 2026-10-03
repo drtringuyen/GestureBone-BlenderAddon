@@ -146,6 +146,71 @@ def _restore_anim(ob, state):
     return now == state["nla"] and (not state["slot"] or (ad.action_slot and ad.action_slot.identifier == state["slot"]))
 
 
+def _remap_users(old, new):
+    """Point every Armature modifier, parent link, GN Object input and driver
+    target that uses `old` at `new`. Returns a list of what was changed."""
+    from ..shared.utils_gn import _get_gn_input, _set_gn_input
+    done = []
+    for ob in bpy.data.objects:
+        if ob is old or ob is new:
+            continue
+        for md in getattr(ob, "modifiers", []):
+            if md.type == 'ARMATURE' and md.object == old:
+                md.object = new
+                done.append(f"{ob.name}:{md.name}")
+            elif md.type == 'NODES' and md.node_group:
+                for it in md.node_group.interface.items_tree:
+                    if getattr(it, "in_out", None) != 'INPUT' or getattr(it, "socket_type", "") != 'NodeSocketObject':
+                        continue
+                    if _get_gn_input(md, it.identifier) == old and _set_gn_input(md, it.identifier, new):
+                        done.append(f"{ob.name}:{md.name}[{it.name}]")
+        if ob.parent == old:
+            mw = ob.matrix_world.copy()
+            ob.parent = new
+            ob.matrix_world = mw
+            done.append(f"{ob.name}:parent")
+        for owner in (ob, getattr(ob, "data", None)):
+            ad = getattr(owner, "animation_data", None) if owner is not None else None
+            for fc in (ad.drivers if ad else []):
+                for v in fc.driver.variables:
+                    for t in v.targets:
+                        if t.id == old:
+                            t.id = new
+                            done.append(f"{owner.name}:{fc.data_path}")
+    # addon property groups (scene current_armature, other rigs' plotting_rig, …)
+    for owner in list(bpy.data.scenes) + list(bpy.data.objects):
+        if owner is old:
+            continue
+        for attr in [a for a in dir(owner) if a.endswith("_props")]:
+            pg = getattr(owner, attr, None)
+            if isinstance(pg, bpy.types.PropertyGroup):
+                done += [f"{owner.name}:{attr}.{p}" for p in _remap_pg(pg, old, new)]
+    return done
+
+
+def _remap_pg(pg, old, new, depth=0):
+    hits = []
+    if depth > 4:
+        return hits
+    for prop in pg.bl_rna.properties:
+        pid = prop.identifier
+        try:
+            val = getattr(pg, pid)
+        except AttributeError:      # stale RNA from an older registration
+            continue
+        if prop.type == 'POINTER':
+            if val is old and not prop.is_readonly:
+                setattr(pg, pid, new)
+                hits.append(pid)
+            elif isinstance(val, bpy.types.PropertyGroup):
+                hits += [f"{pid}.{h}" for h in _remap_pg(val, old, new, depth + 1)]
+        elif prop.type == 'COLLECTION':
+            for i, item in enumerate(val):
+                if isinstance(item, bpy.types.PropertyGroup):
+                    hits += [f"{pid}[{i}].{h}" for h in _remap_pg(item, old, new, depth + 1)]
+    return hits
+
+
 def _join(gesture, plotting):
     ctx = bpy.context
     if ctx.object and ctx.object.mode != 'OBJECT':
@@ -179,16 +244,24 @@ def convert(gesture, delete_splines=True, spacing='UNIFORM', plane='ROOT'):
     for attr in ("meta_collection", "atomic_chain", "meta_rig_preset"):
         setattr(gprops, attr, getattr(plotting.gesturebone_props, attr))
 
-    # 3. meshes follow the deform bones
-    for name in plan["meshes"]:
-        ob = bpy.data.objects[name]
-        for m in ob.modifiers:
-            if m.type == 'ARMATURE' and m.object == plotting:
-                m.object = gesture
-        if ob.parent == plotting:
-            mw = ob.matrix_world.copy()
-            ob.parent = gesture
-            ob.matrix_world = mw
+    # 3. everything that pointed at the MetaPlot follows the deform bones:
+    #    Armature modifiers, parenting, Geometry Nodes Object inputs (the
+    #    meshes' "Bone-weight-Linear" reads its "Deform Armature" there), and
+    #    driver targets on other datablocks
+    plan["remapped"] = _remap_users(plotting, gesture)
+    def _is_link(u):     # being IN a collection / a scene's view-layer bases is fine
+        if isinstance(u, bpy.types.Collection):
+            return True
+        if isinstance(u, bpy.types.Scene):
+            gp = getattr(u, "gesturebone_props", None)
+            return (u.objects.get(plotting.name) is plotting
+                    and (gp is None or gp.current_armature is not plotting))
+        return False
+    leftovers = sorted(f"{type(u).__name__}:{u.name}" for u in bpy.data.user_map(subset={plotting})[plotting]
+                       if u is not gesture and u is not plotting and not _is_link(u))
+    if leftovers:
+        plan["errors"].append(f"still referencing {plotting.name}: {leftovers}")
+        return plan
 
     # 4. one armature (join drops the action slot — restore it)
     anim = _anim_state(gesture)

@@ -19,8 +19,9 @@ def run():
     from test_gesture        import TestGesture
     from test_multi_character import TestMultiCharacter
     from test_persistence    import TestPersistence
+    from test_curvechain     import TestCurveChain
 
-    for cls in (TestPlotting, TestGesture, TestMultiCharacter, TestPersistence):
+    for cls in (TestPlotting, TestGesture, TestMultiCharacter, TestPersistence, TestCurveChain):
         suite.addTests(loader.loadTestsFromTestCase(cls))
 
     runner = unittest.TextTestRunner(verbosity=2)

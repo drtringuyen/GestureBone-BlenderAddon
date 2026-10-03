@@ -395,7 +395,7 @@ def bind_samplers(arm, part, indices, samplers, spacing='UNIFORM'):
                  from_min_y_scale=0.0, from_max_y_scale=1.0,
                  to_min_x_scale=0.0, to_min_y_scale=0.0, to_min_z_scale=0.0,
                  to_max_x_scale=1.0, to_max_y_scale=1.0, to_max_z_scale=1.0,
-                 mix_mode_scale='REPLACE')
+                 mix_mode_scale='REPLACE', use_motion_extrapolate=True)
         new.append(c)
         for off, c in enumerate(new):
             pb.constraints.move(list(pb.constraints).index(c), slot + off)

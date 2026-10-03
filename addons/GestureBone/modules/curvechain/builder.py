@@ -135,8 +135,9 @@ def _set_mode(arm, mode):
 def _con(pb, ctype, name, arm, sub, **kw):
     c = pb.constraints.new(ctype)
     c.name = name
-    c.target = arm
-    c.subtarget = sub
+    if hasattr(c, "target"):
+        c.target = arm
+        c.subtarget = sub
     for k, v in kw.items():
         setattr(c, k, v)
     return c
@@ -256,24 +257,44 @@ def build_chain(arm, part, indices, plane='ROOT'):
         made.append(name)
         return pb
 
+    # 'ROOT': build the spans ON the root bone's plane — points are projected
+    # onto it and handle directions may only turn about its normal (the MCH
+    # bones' local X), so an off-plane control can't tilt the chain.
+    flat = plane == 'ROOT' and root is not None
+
+    def on_plane(pb):
+        if flat:
+            _con(pb, 'LIMIT_LOCATION', TAG + "Plane", None, "", owner_space='CUSTOM',
+                 space_object=arm, space_subtarget=root,
+                 use_min_y=True, use_max_y=True, min_y=0.0, max_y=0.0, use_transform_limit=False)
+
+    def aim(pb, target, axis):
+        if flat:
+            _con(pb, 'LOCKED_TRACK', TAG + "Dir", arm, target, lock_axis='LOCK_X', track_axis=axis)
+        else:
+            _con(pb, 'DAMPED_TRACK', TAG + "Dir", arm, target, track_axis=axis)
+
     remove_drivers(arm, f"MCH-{part}.SEG_")
     for k, (a, b) in enumerate(spans):
         pb = own(dir_b_name(part, a))
         _con(pb, 'COPY_LOCATION', TAG + "Loc", arm, point_name(part, a))
-        _con(pb, 'DAMPED_TRACK', TAG + "Dir", arm, hb_name(part, a), track_axis='TRACK_Y')
+        on_plane(pb)
+        aim(pb, hb_name(part, a), 'TRACK_Y')
         own(tip_b_name(part, a))
         pb = own(dir_a_name(part, b))
         _con(pb, 'COPY_LOCATION', TAG + "Loc", arm, point_name(part, b))
-        _con(pb, 'DAMPED_TRACK', TAG + "Dir", arm, ha_name(part, b), track_axis='TRACK_NEGATIVE_Y')
+        on_plane(pb)
+        aim(pb, ha_name(part, b), 'TRACK_NEGATIVE_Y')
         pb = own(cmp_name(part, k))
-        _con(pb, 'COPY_LOCATION', TAG + "Loc", arm, point_name(part, a))
+        _con(pb, 'COPY_LOCATION', TAG + "Loc", arm, dir_b_name(part, a))
         _con(pb, 'COPY_ROTATION', TAG + "Rot", arm, dir_a_name(part, b))
         own(cmp_tip_name(part, k))
 
         sn = seg_name(part, k)
         pb = own(sn)
         _con(pb, 'COPY_LOCATION', TAG + "Loc", arm, point_name(part, a))
-        _con(pb, 'STRETCH_TO', TAG + "Span", arm, point_name(part, b),
+        on_plane(pb)
+        _con(pb, 'STRETCH_TO', TAG + "Span", arm, dir_a_name(part, b) if flat else point_name(part, b),
              volume='NO_VOLUME', keep_axis='PLANE_X', rest_length=pb.bone.length)
         for prop, pt, handle in (("bbone_easein", point_name(part, a), hb_name(part, a)),
                                  ("bbone_easeout", point_name(part, b), ha_name(part, b))):
@@ -333,10 +354,21 @@ def fixed_slots(arm, part, indices, count):
     return out
 
 
-def bind_samplers(arm, part, indices, samplers, spacing='UNIFORM'):
+def bind_samplers(arm, part, indices, samplers, spacing='UNIFORM', facing=None):
     """Rebind sampler bones (index order = position along the chain) to the
     spans. Replaces GEOMETRY_ATTRIBUTE / earlier CC_ constraints in place, so a
-    trailing Limit Scale or Stretch To keeps running after them."""
+    trailing Limit Scale or Stretch To keeps running after them.
+
+    facing: {sampler: 'TRACK_X' | 'TRACK_NEGATIVE_X'} — which side of the plane
+    each sampler's X faces. The converter measures it from the old GN result;
+    rest frames can NOT tell (LittlePig's right-side chains rest at +Y but the
+    GN drove them to -Y). Missing entries keep an existing CC_Up's setting,
+    else default to TRACK_X (toward MCH-{part}.Up)."""
+    facing = dict(facing or {})
+    for name in samplers:
+        old = arm.pose.bones[name].constraints.get(TAG + "Up")
+        if name not in facing and old is not None:
+            facing[name] = old.track_axis
     nspan = len(indices) - 1
     count = len(samplers)
     root = chain_root(arm, part)
@@ -359,6 +391,12 @@ def bind_samplers(arm, part, indices, samplers, spacing='UNIFORM'):
     slots = fixed_slots(arm, part, indices, count)
     pbs = arm.pose.bones
     report = []
+    # 'ROOT' plane (Up parented to the chain root): also PROJECT every sampler
+    # onto the root bone's plane, so the deform chain lies flat on it even when
+    # a control drifts off-plane. 'ARMATURE' keeps the old GN behaviour (no
+    # projection) for converted rigs.
+    up_b = arm.data.bones.get(up_name(part))
+    project = root is not None and up_b is not None and up_b.parent is not None and up_b.parent.name == root
     for s, name in enumerate(samplers):
         pb = pbs[name]
         slot = next((i for i, c in enumerate(pb.constraints)
@@ -387,8 +425,14 @@ def bind_samplers(arm, part, indices, samplers, spacing='UNIFORM'):
             k, ht = slots[s]
             new.append(_con(pb, 'COPY_TRANSFORMS', f"{TAG}Sample_{k}", arm, seg_name(part, k),
                             head_tail=ht, use_bbone_shape=True))
+        if project:
+            # root bones point along the plane normal: their local Y is it
+            new.append(_con(pb, 'LIMIT_LOCATION', TAG + "Plane", None, "",
+                            owner_space='CUSTOM', space_object=arm, space_subtarget=root,
+                            use_min_y=True, use_max_y=True, min_y=0.0, max_y=0.0,
+                            use_transform_limit=False))
         new.append(_con(pb, 'LOCKED_TRACK', TAG + "Up", arm, up_name(part),
-                        lock_axis='LOCK_Y', track_axis='TRACK_X'))
+                        lock_axis='LOCK_Y', track_axis=facing.get(name, 'TRACK_X')))
         c = _con(pb, 'TRANSFORM', TAG + "Radius", arm, rad_name(part, s),
                  target_space='POSE', owner_space='POSE', map_from='SCALE', map_to='SCALE',
                  map_to_x_from='Y', map_to_y_from='Y', map_to_z_from='Y',

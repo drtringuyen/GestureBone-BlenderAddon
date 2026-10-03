@@ -68,6 +68,7 @@ def collect(gesture):
     if gesture.matrix_world != plotting.matrix_world:
         plan["errors"].append("the two rigs have different object transforms")
 
+    gesture_eval_dg = bpy.context.evaluated_depsgraph_get()
     for chain in plotting.gesturebone_props.chains:
         part = chain.part_name
         indices = builder.chain_indices(chain)
@@ -86,7 +87,14 @@ def collect(gesture):
                 if c.type == 'GEOMETRY_ATTRIBUTE' and plot_spline is not None and c.target == plot_spline:
                     samplers[c.sample_index] = pb.name
         order = [samplers[i] for i in sorted(samplers)]
-        plan["chains"].append({"part": part, "indices": indices, "samplers": order,
+        # which way the old GN faced each sampler (X toward +normal or -normal)
+        normal = builder.WORLD_NORMAL_HINT
+        facing = {}
+        pl_eval = plotting.evaluated_get(gesture_eval_dg)
+        for name in order:
+            x = (plotting.matrix_world @ pl_eval.pose.bones[name].matrix).to_3x3().col[0].normalized()
+            facing[name] = 'TRACK_X' if x.dot(normal) >= 0 else 'TRACK_NEGATIVE_X'
+        plan["chains"].append({"part": part, "indices": indices, "samplers": order, "facing": facing,
                                "sample_count": (max(samplers) + 1) if samplers else 0})
         if not samplers:
             plan["errors"].append(f"{part}: no sampler bones read from a PlottingSpline")
@@ -282,7 +290,9 @@ def convert(gesture, delete_splines=True, spacing='UNIFORM', plane='ROOT'):
             plan["errors"].append(f"{part}: missing after join {miss}")
             continue
         builder.build_chain(gesture, part, indices, plane)
-        builder.bind_samplers(gesture, part, indices, ch["samplers"], spacing)
+        # facing is relative to MCH-{part}.Up, which sits on -Y for 'ARMATURE'
+        # and on the root's (sign-matched) -Y-ish normal for 'ROOT'
+        builder.bind_samplers(gesture, part, indices, ch["samplers"], spacing, ch["facing"])
         built.append(part)
     for pb in gesture.pose.bones:
         for c in list(pb.constraints):

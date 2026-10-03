@@ -150,6 +150,22 @@ class TestCurveChain(unittest.TestCase):
         self.assertLess(worst / flat.length, 0.01)
         self.assertTrue(self.ob.animation_data and self.ob.animation_data.action)
 
+    def test_root_plane_projects_and_follows_root(self):
+        P = self.ob.pose.bones
+        mw = self.ob.matrix_world
+        # push a control off the plane, then tilt the chain root
+        m = (mw @ P[f"CTRL-{PART}_2"].matrix).copy(); m.translation.y += 0.15
+        P[f"CTRL-{PART}_2"].matrix = mw.inverted() @ m
+        P[f"CTRL-{PART}.Rotation"].rotation_mode = 'XYZ'
+        P[f"CTRL-{PART}.Rotation"].rotation_euler = (0.0, 0.0, 0.5)
+        bpy.context.view_layer.update()
+        root = mw @ P[f"CTRL-{PART}.Rotation"].matrix
+        n = root.to_3x3().col[1].normalized()
+        for k in range(N_SAMPLES):
+            m = mw @ P[f"STR-{PART}.{k:03d}"].matrix
+            self.assertLess(abs((m.translation - root.translation).dot(n)), 1e-4, f"sample {k} off the root plane")
+            self.assertAlmostEqual(abs(m.to_3x3().normalized().col[0].dot(n)), 1.0, places=3)
+
     def test_rig_type_enum_keeps_saved_indices(self):
         items = [i.identifier for i in bpy.types.Object.bl_rna.properties["gesturebone_props"]
                  .fixed_type.properties["rig_type"].enum_items]

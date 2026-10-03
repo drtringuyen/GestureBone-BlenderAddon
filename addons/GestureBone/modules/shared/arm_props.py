@@ -90,12 +90,13 @@ class GESTUREBONE_PG_ArmatureProps(bpy.types.PropertyGroup):
              "MetaRig — contains META bones, runs rig generation, owns chain definitions"),
             ('GESTURE',  "Gesture Rig",
              "Control rig — contains CTRL bones, used for gesture drawing and binding"),
-            ('UNIFIED',  "Single Rig",
-             "One armature: CTRL bones, B-Bone curve machinery and DEF bones together, "
-             "drawn with the Annotate tool (no curves, no Geometry Nodes)"),
             ('PRESET',   "Rig Preset",
              "Template armature — appears in Create Rig dropdown"),
             ('NONE',     "Untagged", ""),
+            # Saved files store this enum by INDEX — new items go last, never in between.
+            ('UNIFIED',  "Single Rig",
+             "One armature: CTRL bones, B-Bone curve machinery and DEF bones together, "
+             "drawn with the Annotate tool (no curves, no Geometry Nodes)"),
         ],
         default='NONE',
         override={'LIBRARY_OVERRIDABLE'},
@@ -147,6 +148,12 @@ class GESTUREBONE_PG_ArmatureProps(bpy.types.PropertyGroup):
     show_both_armatures: BoolProperty(name="Show Both",         default=True, override={'LIBRARY_OVERRIDABLE'})
     show_generate_part: BoolProperty(name="Generate Part by Part", default=True, override={'LIBRARY_OVERRIDABLE'})
     show_debug_steps:   BoolProperty(name="Debug Steps",        default=False, override={'LIBRARY_OVERRIDABLE'})
+    auto_single_rig:    BoolProperty(
+        name="Single Rig",
+        description="Finish Auto Rig by merging everything into one armature — no Gesture/Plotting "
+                    "curves, no Geometry Nodes, drawn with the Annotate tool. The Plotting rig stops "
+                    "existing, so re-rigging a part afterwards needs the two-rig setup",
+        default=False, override={'LIBRARY_OVERRIDABLE'})
 
     # ── EXPRESSION SHEET: per-bone sprite sheets ──────────────────────────────
     # USE_INSERTION so a downstream file can register NEW expression bones on

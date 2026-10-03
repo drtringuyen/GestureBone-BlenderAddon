@@ -284,8 +284,11 @@ class GESTUREBONE_PG_ChainDefinition(bpy.types.PropertyGroup):
         name="Layer Depth",
         description="Root Bone plane only: push the chain toward the camera, from 0 at its first point to "
                     "this distance at its last, so where the chain crosses itself (legs passing) the later "
-                    "part draws in front instead of cutting through",
-        default=0.0, soft_min=-0.1, soft_max=0.1, step=0.1, precision=3, subtype='DISTANCE',
+                    "part draws in front instead of cutting through or z-fighting (negative: the "
+                    "first part in front)",
+        # non-zero by default: projecting a chain makes it exactly coplanar, so
+        # any self-overlap (legs passing, both feet together) would z-fight
+        default=0.01, soft_min=-0.1, soft_max=0.1, step=0.1, precision=3, subtype='DISTANCE',
         update=lambda self, ctx: _on_layer_depth_update(self, ctx),
         override={'LIBRARY_OVERRIDABLE'},
     )

@@ -293,6 +293,9 @@ def convert(gesture, delete_splines=True, spacing='UNIFORM', plane='ROOT'):
         # facing is relative to MCH-{part}.Up, which sits on -Y for 'ARMATURE'
         # and on the root's (sign-matched) -Y-ish normal for 'ROOT'
         builder.bind_samplers(gesture, part, indices, ch["samplers"], spacing, ch["facing"])
+        chain = next((c for c in gprops.chains if c.part_name == part), None)
+        if chain is not None:
+            builder.apply_layer_depth(gesture, part, chain.layer_depth)
         built.append(part)
     for pb in gesture.pose.bones:
         for c in list(pb.constraints):

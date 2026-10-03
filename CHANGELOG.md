@@ -4,6 +4,25 @@
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the current design.
 
+### Research: single rig (`research/single-rig`, Oct 2026)
+- **New `curvechain` module, single-armature rig.** Each chain's
+  Gesture/Plotting curves and their Geometry Nodes are replaced by hidden
+  B-Bone spans inside one armature. Exact-bezier ease drivers, even arc-length
+  sampling and a planar up-vector are all simple expressions, so there is no
+  Python driver evaluation. DEF bones and names are unchanged, and no
+  deforming bone uses B-Bones. The new rig type `UNIFIED` is appended last,
+  because `rig_type` is saved by index.
+- **Drawing uses the Annotate tool in Pose mode** (layer `GB:{part}`).
+  **Apply** fits the stroke and keys points + handles on the current frame,
+  and it also works on library overrides without localizing anything.
+- **`Convert to Single Rig` (Gesture panel)** and an **Auto Rig "Single Rig"
+  toggle** do the conversion. The converter re-points every MetaPlot user,
+  including the meshes' GN *Deform Armature* input, and restores the action
+  slot that `object.join()` drops. It also renames handles `.hL/.hR` →
+  `.hA/.hB`.
+- Design, measurements and limits are in
+  [docs/single-rig-design.md](docs/single-rig-design.md).
+
 ### Architecture (unified rig model)
 - **Two-rig model**: every armature is tagged `rig_type`
   (`PLOTTING` / `GESTURE` / `PRESET` / `NONE`). The PLOTTING rig (MetaRig) owns

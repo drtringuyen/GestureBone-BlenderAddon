@@ -445,10 +445,15 @@ def bind_samplers(arm, part, indices, samplers, spacing='UNIFORM', facing=None):
             pb.constraints.move(list(pb.constraints).index(c), slot + off)
         if project:
             # the rig's own trailing Stretch To (end caps aim at their End
-            # handle) must not roll the bone off the plane
-            for c in pb.constraints:
-                if c.type == 'STRETCH_TO' and not c.name.startswith(TAG):
-                    c.keep_axis = 'PLANE_X'
+            # handle, which may sit off the plane) is left as is; after it,
+            # put X back on the plane normal and turn Y only about that normal
+            # toward the target — the end cap still aims at its handle, flat.
+            stretch = next((c for c in pb.constraints if c.type == 'STRETCH_TO' and not c.name.startswith(TAG)), None)
+            if stretch is not None and stretch.subtarget:
+                _con(pb, 'LOCKED_TRACK', TAG + "EndUp", arm, up_name(part),
+                     lock_axis='LOCK_Y', track_axis=facing.get(name, 'TRACK_X'))
+                _con(pb, 'LOCKED_TRACK', TAG + "EndAim", arm, stretch.subtarget,
+                     lock_axis='LOCK_X', track_axis='TRACK_Y')
 
         # radius carrier: r = r0 + Σ (r_k+1 - r_k) * t_k   (t_k clamped span param)
         rp = pbs[rad_name(part, s)]

@@ -256,6 +256,18 @@ class GESTUREBONE_PG_ChainDefinition(bpy.types.PropertyGroup):
     is_drawing: BoolProperty(name="Drawing", default=False, override={'LIBRARY_OVERRIDABLE'})
     drawing_frame: IntProperty(name="Drawing Frame", default=-1, override={'LIBRARY_OVERRIDABLE'})
 
+    # ── Single rig (curvechain) ────────────────────────────────────────────────
+    plane_space: EnumProperty(
+        name="Plane",
+        description="Which plane the chain is flattened onto and which way its bones face",
+        items=[
+            ('ROOT', "Root Bone", "Follow the chain's Rotation/Pivot bone — rotating it tilts the plane"),
+            ('ARMATURE', "Armature", "Fixed armature front plane (-Y), like the old Geometry Nodes rig"),
+        ],
+        default='ROOT',
+        override={'LIBRARY_OVERRIDABLE'},
+    )
+
     # ── UI collapse state ──────────────────────────────────────────────────────
     ui_expanded: BoolProperty(name="Expanded", default=False, override={'LIBRARY_OVERRIDABLE'})
 

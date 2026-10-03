@@ -90,6 +90,9 @@ class GESTUREBONE_PG_ArmatureProps(bpy.types.PropertyGroup):
              "MetaRig — contains META bones, runs rig generation, owns chain definitions"),
             ('GESTURE',  "Gesture Rig",
              "Control rig — contains CTRL bones, used for gesture drawing and binding"),
+            ('UNIFIED',  "Single Rig",
+             "One armature: CTRL bones, B-Bone curve machinery and DEF bones together, "
+             "drawn with the Annotate tool (no curves, no Geometry Nodes)"),
             ('PRESET',   "Rig Preset",
              "Template armature — appears in Create Rig dropdown"),
             ('NONE',     "Untagged", ""),

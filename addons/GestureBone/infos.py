@@ -165,14 +165,27 @@ class GESTUREBONE_OT_ToggleExpressionSheet(bpy.types.Operator):
         module_manager.toggle("expression_sheet")
         return {'FINISHED'}
 
+
+class GESTUREBONE_OT_ToggleCurveChain(bpy.types.Operator):
+    """Toggle CurveChain (single rig) module on/off"""
+    bl_idname = "gesturebone.toggle_curvechain"
+    bl_label = "CurveChain"
+
+    def execute(self, context):
+        from . import module_manager
+        module_manager.toggle("curvechain")
+        return {'FINISHED'}
+
 def register():
     for cls in _classes:
         bpy.utils.register_class(cls)
     bpy.utils.register_class(GESTUREBONE_OT_ToggleRiglinking)
     bpy.utils.register_class(GESTUREBONE_OT_ToggleExpressionSheet)
+    bpy.utils.register_class(GESTUREBONE_OT_ToggleCurveChain)
 
 
 def unregister():
+    bpy.utils.unregister_class(GESTUREBONE_OT_ToggleCurveChain)
     bpy.utils.unregister_class(GESTUREBONE_OT_ToggleExpressionSheet)
     bpy.utils.unregister_class(GESTUREBONE_OT_ToggleRiglinking)
     for cls in reversed(_classes):

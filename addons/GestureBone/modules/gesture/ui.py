@@ -37,6 +37,12 @@ def draw_gesture_ui(layout, context, arm):
     header_row.label(text=f"Plotting Rig: {plotting.name}", icon='ARMATURE_DATA')
     header_row.operator("gesturebone.switch_armature", text="", icon='ARROW_LEFTRIGHT')
 
+    try:
+        from ..curvechain.ui import draw_convert_box
+        draw_convert_box(layout, arm)
+    except ImportError:
+        pass
+
     # ── Load Chains button ────────────────────────────────────────────────────
     load_row = layout.row(align=True)
     load_row.operator("gesturebone.load_chains", text="Load Chains", icon='FILE_REFRESH')

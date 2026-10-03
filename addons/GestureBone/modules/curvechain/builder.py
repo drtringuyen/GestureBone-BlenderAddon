@@ -450,8 +450,8 @@ def bind_samplers(arm, part, indices, samplers, spacing='UNIFORM', facing=None):
             # toward the target — the end cap still aims at its handle, flat.
             stretch = next((c for c in pb.constraints if c.type == 'STRETCH_TO' and not c.name.startswith(TAG)), None)
             if stretch is not None and stretch.subtarget:
-                _con(pb, 'LOCKED_TRACK', TAG + "EndUp", arm, up_name(part),
-                     lock_axis='LOCK_Y', track_axis=facing.get(name, 'TRACK_X'))
+                _con(pb, 'DAMPED_TRACK', TAG + "EndUp", arm, up_name(part),
+                     track_axis=facing.get(name, 'TRACK_X'))
                 _con(pb, 'LOCKED_TRACK', TAG + "EndAim", arm, stretch.subtarget,
                      lock_axis='LOCK_X', track_axis='TRACK_Y')
 
@@ -475,7 +475,30 @@ def bind_samplers(arm, part, indices, samplers, spacing='UNIFORM', facing=None):
             terms = [f"(r{k + 1} - r{k}) * {1.0 if k < k0 else (ht if k == k0 else 0.0)!r}" for k in range(nspan)]
         drv.expression = "r0 + " + " + ".join(terms)
         report.append(name)
+    _project_end_bones(arm, part, root, project)
     return report
+
+
+def _project_end_bones(arm, part, root, project):
+    """The template's end bones (STR-/AXIS-{part}.EndL/EndR …) copy the CTRL
+    End handles' locations directly. In root-plane mode project them too, so
+    the whole deform chain lies on the root plane."""
+    for pb in arm.pose.bones:
+        if not pb.name.startswith((f"STR-{part}", f"AXIS-{part}")):
+            continue
+        tagged = pb.constraints.get(TAG + "EndPlane")
+        if tagged is not None:
+            pb.constraints.remove(tagged)
+        if not project:
+            continue
+        copies = [i for i, c in enumerate(pb.constraints)
+                  if c.type == 'COPY_LOCATION' and getattr(c, "subtarget", "").startswith("CTRL-")]
+        if not copies:
+            continue
+        c = _con(pb, 'LIMIT_LOCATION', TAG + "EndPlane", None, "", owner_space='CUSTOM',
+                 space_object=arm, space_subtarget=root,
+                 use_min_y=True, use_max_y=True, min_y=0.0, max_y=0.0, use_transform_limit=False)
+        pb.constraints.move(list(pb.constraints).index(c), copies[-1] + 1)
 
 
 def non_simple_drivers(arm):

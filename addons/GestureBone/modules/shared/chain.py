@@ -141,10 +141,14 @@ def _on_layer_depth_update(self, context):
     if getattr(arm, "type", None) != 'ARMATURE':
         return
     try:
-        from ..curvechain.builder import apply_layer_depth
+        from ..curvechain.builder import apply_layer_depth, chain_indices
+        from ..export import optimize
     except ImportError:
         return
-    apply_layer_depth(arm, self.part_name, self.layer_depth)
+    if optimize.deform_mode(arm) == optimize.MODE_BBONE:
+        optimize.apply_layer_depth(arm, self.part_name, chain_indices(self), self.layer_depth)
+    else:
+        apply_layer_depth(arm, self.part_name, self.layer_depth)
     arm.update_tag()
 
 

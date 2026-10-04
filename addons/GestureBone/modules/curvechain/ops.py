@@ -236,6 +236,15 @@ class GESTUREBONE_OT_CCRebuild(bpy.types.Operator):
         if chain is None:
             return {'CANCELLED'}
         idx = bd.chain_indices(chain)
+        if arm.library is not None or arm.override_library is not None:
+            self.report({'ERROR'}, "Linked/overridden rig — rebuild it in the CHR file")
+            return {'CANCELLED'}
+        from ..export import optimize
+        if optimize.deform_mode(arm) == optimize.MODE_BBONE:
+            optimize.build_bdef_chain(arm, chain.part_name, idx, chain.plane_space)
+            optimize.apply_layer_depth(arm, chain.part_name, idx,
+                                       chain.layer_depth if chain.plane_space == 'ROOT' else 0.0)
+            return {'FINISHED'}
         bd.build_chain(arm, chain.part_name, idx, chain.plane_space)
         samplers = bd.samplers_of(arm, chain.part_name)
         if samplers:

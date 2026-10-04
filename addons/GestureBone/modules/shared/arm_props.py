@@ -148,6 +148,20 @@ class GESTUREBONE_PG_ArmatureProps(bpy.types.PropertyGroup):
     show_both_armatures: BoolProperty(name="Show Both",         default=True, override={'LIBRARY_OVERRIDABLE'})
     show_generate_part: BoolProperty(name="Generate Part by Part", default=True, override={'LIBRARY_OVERRIDABLE'})
     show_debug_steps:   BoolProperty(name="Debug Steps",        default=False, override={'LIBRARY_OVERRIDABLE'})
+    deform_mode: EnumProperty(
+        name="Deform Mode",
+        items=[
+            ('SAMPLER', "Sampler", "Template STR/AXIS/SIZE/DEF bones read the hidden B-Bone spans"),
+            ('BBONE', "Blender Optimized", "The B-Bone spans (BDEF-) deform the mesh directly"),
+        ],
+        default='SAMPLER', override={'LIBRARY_OVERRIDABLE'})
+    export_segments: IntProperty(
+        name="Segments per Span",
+        description="Plain bones generated per B-Bone span for game export (preview before exporting)",
+        default=4, min=1, max=32, override={'LIBRARY_OVERRIDABLE'})
+    export_path: StringProperty(
+        name="Export Path", subtype='FILE_PATH', default="//export/",
+        description="Folder the FBX/glTF files are written to", override={'LIBRARY_OVERRIDABLE'})
     auto_single_rig:    BoolProperty(
         name="Single Rig",
         description="Finish Auto Rig by merging everything into one armature — no Gesture/Plotting "

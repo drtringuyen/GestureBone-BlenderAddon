@@ -180,6 +180,104 @@ The annotation API differs between versions. Blender 5.1's
 the chain layer's frame instead. The read path is identical in 5.1 and 5.2,
 and the end-to-end test gives identical results on 5.1.2 and 5.2.2.
 
+## Export module (`modules/export/`)
+
+This module adds an **Export** box under the chain cards of a single rig. It
+has three independent steps.
+
+**1. Bake Weights / Live** (`weights.py`). For every mesh whose
+Bone-weight-Linear modifier reads this rig, Bake does three things:
+
+- It evaluates the stack up to that modifier.
+- It writes the result into the vertex groups.
+- It **mutes** the modifier, keeping all its settings, so **Live** brings it
+  back for tuning.
+
+When a node adds geometry (sprite hands/feet), Bake swaps in the evaluated
+mesh and keeps the original as `gb_weights_source`, so Live can restore it.
+
+Bake skips, with a report:
+
+- inputs that are animated or driven (RU's sprite `Hand_*`/`Feet_*` follow
+  `exp_index`);
+- mesh data shared with another object;
+- linked or overridden meshes.
+
+Result on LittlePig: 12.9 → 2.55 ms/frame.
+
+**2. Optimize: Blender Optimized** (`optimize.py`). It first writes a
+`<file>_beforeBDEF.blend` backup, then:
+
+- **Bones:** deletes the template STR/AXIS/SIZE/DEF and sampler machinery. The
+  B-Bone spans themselves become the deformers: `BDEF-{part}.001…`, with
+  `.EndL/.EndR` caps, CURVED mapping, and thickness from bbone scale drivers.
+- **Rest pose:** each span's rest ease is the exact bezier ease, and the pose
+  drivers subtract it, so the rest pose is identity (0.002 mm in-plane).
+- **Weights:** `weight_nodes.ensure_bdef_branch` adds a `BDEF-` prefix to the
+  Bone-weight-Linear node. It copies the STR branch, following reroutes.
+  `retarget_weights` sets Bone Count = spans and pre-creates the BDEF vertex
+  groups, because GN only writes groups that already exist.
+
+Result on RU: 441 → 191 bones, 610 → 246 constraints, 232 → 48 drivers,
+~17 → ~10 ms.
+
+**3. Game export** (`gamerig.py`). Game engines can't read B-Bones, so the
+export rig is a **temporary** armature built in the exporting file
+(`EXPORT-{rig}`, collection `GB_EXPORT`):
+
+- Each B-Bone span becomes *Segments* plain bones. Each bone Copy Transforms
+  and Stretch To the span with `use_bbone_shape`, and its rest comes from the
+  B-Bone's own `bbone_segment_matrix(i, rest=True)` joints.
+- The deformed meshes are copied onto it. Weights are either **Match
+  B-Bones** or **Weight Node**:
+  - **Match B-Bones** splits each span weight between the two segments that
+    bracket the vertex on the rest curve, which is exactly what Blender does.
+  - **Weight Node** has the node weight the segments live, so they can be
+    tuned on the preview.
+- **Preview** keeps the rig so you can inspect and tweak it. **Unity FBX** /
+  **Godot glTF** bakes the rig (`nla.bake`), writes the file and removes
+  everything temporary.
+
+Measured on RU at 4 segments: 37 export bones. Copies match the shot with a
+rest pose within 0.01 mm and a posed median of 0.7–1.4 mm; a few crotch
+vertices are off by up to ~9 cm. FBX and GLB re-import with skin and
+animation.
+
+**Repair ANIM File.** An ANIM file that overrides the CHR keeps its own
+actions, and those still key `.hL/.hR/.End.L/.End.R`. After the CHR is
+converted, the Export box shows *Repair ANIM File (n keys)*. Repair renames the
+paths in local actions only (the active action plus NLA strip actions). It
+renames a path only when the old bone is gone and the new one exists. The
+renames go by suffix, so `LIMIT-*_0.hL` is covered too.
+
+### Linking test (copy of ANIM_LAKESCENE → converted CHR_RU)
+
+The test used copies only. `CHR_RU.blend` was retargeted to `ru_new` (Sampler)
+or `ru_bdef` (Optimized), and the copy was reopened so the overrides resync.
+Results, identical in both modes:
+
+- **Resync is clean.** The MetaPlot and spline overrides are gone. The meshes'
+  `Armature.object`, GN *Deform Armature* and parent all resync to
+  `CHR_RU.Gesture`, and object transforms stay identity.
+- **Repair** renamed 606 keys (202 in each of S1/S2/S3), leaving 0 stale and
+  0 dangling keys in the local actions. The library `ANIM_HeadTurn.*` actions
+  key `Eye.L/R` and `Head.Antenne.L/R`, which are not on the old rig either.
+- The body, head, 2D parts and stick match the original shot to 0.00 mm.
+- Unity FBX and Godot glTF export from the ANIM file works and leaves no
+  temporary objects.
+- The legs and arms differ by about 0.1 m (≈0.5 % of the 20-unit character).
+  Playing the same action inside the CHR copies, with no linking, gives the
+  same numbers, so this is the rig and not the linking.
+  - **Cause: facing.** In the converted rig the DEF Z (plane normal)
+    rigidly follows `CTRL-{part}.Rotation`. The old GN rig kept it on one
+    world side.
+  - The shot has both Rotation bones turned 180° on ~88 % of its frames, so
+    there the new rig shows the limbs from the other side.
+  - The Arms' 2D Outline vertex count then differs too (+6 verts).
+
+Pre-existing and unrelated: the cycles from the ENV `pink_glow_off` driver,
+and the invalid `Socket_41 value[0]` driver on `CHR_RU-Arms.mesh`.
+
 ## Known limits / next steps
 
 - **Old curves on Auto Rig.** On LittlePig, Auto Rig + Single Rig left the

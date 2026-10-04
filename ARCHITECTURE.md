@@ -225,6 +225,15 @@ and their GN, and the unchanged STR→AXIS→SIZE→DEF stack.
 - **`ops.py`, `ui.py`:** the UI is dispatched from `panels.py` like the
   others.
 
+`modules/export/` is drawn inside the UNIFIED UI. It contains:
+
+- **`weights.py`:** Bake/Live of the Bone-weight-Linear result.
+- **`weight_nodes.py`:** the `BDEF-` prefix branch on that node.
+- **`optimize.py`:** Blender Optimized; B-Bone spans deform as `BDEF-*`.
+- **`gamerig.py`:** the temporary segment-bone export rig, FBX/glTF.
+- **`ops.py`, `ui.py`:** the operators (including Repair ANIM File) and the
+  Export box.
+
 Full write-up: [docs/single-rig-design.md](docs/single-rig-design.md).
 
 ## 9. History

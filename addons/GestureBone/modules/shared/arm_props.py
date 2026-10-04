@@ -170,6 +170,7 @@ class GESTUREBONE_PG_ArmatureProps(bpy.types.PropertyGroup):
         default='BBONE', override={'LIBRARY_OVERRIDABLE'})
     export_path: StringProperty(
         name="Export Path", subtype='FILE_PATH', default="//export/",
+        options={'PATH_SUPPORTS_BLEND_RELATIVE'},
         description="Folder the FBX/glTF files are written to", override={'LIBRARY_OVERRIDABLE'})
     auto_single_rig:    BoolProperty(
         name="Single Rig",

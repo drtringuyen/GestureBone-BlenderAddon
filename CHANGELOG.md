@@ -20,6 +20,14 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the current design.
   including the meshes' GN *Deform Armature* input, and restores the action
   slot that `object.join()` drops. It also renames handles `.hL/.hR` →
   `.hA/.hB`.
+- **New `export` module** (Export box under the chain cards):
+  - **Bake Weights / Live:** bakes the Bone-weight-Linear result and mutes
+    the modifier, so it can be restored.
+  - **Optimize:** switches to Blender Optimized, where the B-Bone spans deform
+    directly as `BDEF-*`. The weight node gets a `BDEF-` prefix.
+  - **Game export:** a temporary segment-bone rig, exported as Unity FBX or
+    Godot glTF.
+  - **Repair ANIM File:** renames old handle keys in overriding files.
 - Design, measurements and limits are in
   [docs/single-rig-design.md](docs/single-rig-design.md).
 

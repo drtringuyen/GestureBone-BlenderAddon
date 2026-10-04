@@ -69,6 +69,18 @@ def draw_unified_ui(layout, context, arm):
         info.enabled = False
         info.label(text=f"{len(bd.chain_indices(chain))} points · layer {fit.layer_name(part)}")
 
+    _draw_export(layout, context, arm)
+
+
+def _draw_export(layout, context, arm):
+    try:
+        from .. import export
+        from ...module_manager import is_loaded
+    except ImportError:
+        return
+    if is_loaded("export"):
+        export.ui.draw_export_ui(layout, context, arm)
+
 
 def draw_convert_box(layout, arm):
     """Offer the conversion on a classic GESTURE rig."""

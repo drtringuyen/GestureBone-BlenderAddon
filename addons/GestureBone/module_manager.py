@@ -12,6 +12,7 @@ ALL_MODULES = [
     {"name": "riglinking", "op": "gesturebone.toggle_riglinking", "icon": "LINKED"},
     {"name": "expression_sheet", "op": "gesturebone.toggle_expression_sheet", "icon": "UV"},
     {"name": "curvechain", "op": "gesturebone.toggle_curvechain", "icon": "IPO_BEZIER"},
+    {"name": "export", "op": "gesturebone.toggle_export", "icon": "EXPORT"},
 ]
 
 

@@ -1,12 +1,12 @@
 """
-export — Bake Weights, Blender Optimized (BDEF B-Bones) and game export.
+export — Bake Weights, Blender Optimized (BDEF B-Bones), game export, ANIM repair.
 """
-from . import weights, weight_nodes, optimize  # noqa: F401
+from . import weights, weight_nodes, optimize, gamerig, ops, ui  # noqa: F401
 
 
 def register():
-    pass
+    ops.register()
 
 
 def unregister():
-    pass
+    ops.unregister()

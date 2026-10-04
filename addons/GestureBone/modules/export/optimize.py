@@ -77,6 +77,35 @@ def _delete_bones(arm, names):
     return len(dead)
 
 
+def rest_ease(p0, hb, ha, p1):
+    """Ease (in, out) that makes a B-Bone span the exact cubic (p0, hb, ha, p1).
+    Blender's handle length is ease * chord / (1.5 * (1 + cos(θ/2)))."""
+    c = (p1 - p0).length or 1e-9
+    db, da = hb - p0, p1 - ha
+    if db.length < 1e-9 or da.length < 1e-9:
+        return 1.0, 1.0
+    t = db.angle(da)
+    k = 1.5 * (1 + __import__("math").cos(t / 2)) / c
+    return db.length * k, da.length * k
+
+
+def _rest_pose_heads(arm, names):
+    """Armature-space heads of `names` with every pose channel at identity —
+    i.e. where the rig's own constraints put them at rest pose. End handles hang
+    under Limit Distance bones, so this differs from their stored rest."""
+    saved = {pb.name: pb.matrix_basis.copy() for pb in arm.pose.bones}
+    try:
+        from mathutils import Matrix
+        for pb in arm.pose.bones:
+            pb.matrix_basis = Matrix.Identity(4)
+        bpy.context.view_layer.update()
+        return {n: arm.pose.bones[n].head.copy() for n in names if arm.pose.bones.get(n)}
+    finally:
+        for pb in arm.pose.bones:
+            pb.matrix_basis = saved[pb.name]
+        bpy.context.view_layer.update()
+
+
 def _old_rest(arm, name):
     b = arm.data.bones.get(name)
     return (b.head_local.copy(), b.tail_local.copy()) if b else None
@@ -104,13 +133,16 @@ def build_bdef_chain(arm, part, indices, plane='ROOT', end_rest=None):
     for side in ("EndL", "EndR"):          # a rebuild keeps the current end caps' rest
         if not end_rest.get(side) and bones.get(bdef_end(part, side)):
             end_rest[side] = _old_rest(arm, bdef_end(part, side))
+    handles = [end_handle(part, indices, s) for s in ("EndL", "EndR")]
+    at_rest = _rest_pose_heads(arm, handles + [point_name(part, indices[0]), point_name(part, indices[-1])])
     for side in ("EndL", "EndR"):
         h = end_handle(part, indices, side)
         if end_rest.get(side):
             ends[side] = end_rest[side]
-        elif bones.get(h):
-            hp = bones[h].head_local.copy()
-            ends[side] = (hp, P[indices[0]]) if side == "EndL" else (P[indices[-1]], hp)
+        elif h in at_rest:
+            hp = at_rest[h]
+            first, last = at_rest[point_name(part, indices[0])], at_rest[point_name(part, indices[-1])]
+            ends[side] = (hp, first) if side == "EndL" else (last, hp)
     _delete_bones(arm, [n for n in _doomed(arm, part)])
     bones = arm.data.bones
 
@@ -129,7 +161,9 @@ def build_bdef_chain(arm, part, indices, plane='ROOT', end_rest=None):
             eb = _eb(arm, bdef_name(part, k), P[a], P[b] - P[a], normal, (P[b] - P[a]).length, root)
             eb.use_deform = True
             eb.bbone_segments = BBONE_SEGMENTS
-            eb.bbone_easein = eb.bbone_easeout = 1.0
+            # the mesh binds to the REST shape: make it the exact rest bezier
+            # (the pose drivers below subtract the same rest ease)
+            eb.bbone_easein, eb.bbone_easeout = rest_ease(P[a], HB[a], HA[b], P[b])
             eb.bbone_handle_type_start = 'TANGENT'
             eb.bbone_custom_handle_start = arm.data.edit_bones[dir_b_name(part, a)]
             eb.bbone_handle_type_end = 'TANGENT'
@@ -188,11 +222,12 @@ def build_bdef_chain(arm, part, indices, plane='ROOT', end_rest=None):
             own(cmp_tip_name(part, k), mch)
         sn = bdef_name(part, k)
         pb = own(sn, bdc)
+        rest_in, rest_out = pb.bone.bbone_easein, pb.bone.bbone_easeout
         _con(pb, 'COPY_LOCATION', TAG + "Loc", arm, point_name(part, a)); on_plane(pb)
         _con(pb, 'STRETCH_TO', TAG + "Span", arm, dir_a_name(part, b) if flat else point_name(part, b),
              volume='NO_VOLUME', keep_axis='PLANE_X', rest_length=pb.bone.length)
-        for prop, pt, handle in (("bbone_easein", point_name(part, a), hb_name(part, a)),
-                                 ("bbone_easeout", point_name(part, b), ha_name(part, b))):
+        for prop, pt, handle, rest in (("bbone_easein", point_name(part, a), hb_name(part, a), rest_in),
+                                       ("bbone_easeout", point_name(part, b), ha_name(part, b), rest_out)):
             _, drv = _driver(arm, f'pose.bones["{sn}"].{prop}')
             _v_dist(drv, "h", arm, pt, handle)
             _v_dist(drv, "c", arm, point_name(part, a), point_name(part, b))
@@ -202,11 +237,11 @@ def build_bdef_chain(arm, part, indices, plane='ROOT', end_rest=None):
                 v = drv.variables.new(); v.name = "t"; v.type = 'ROTATION_DIFF'
                 for tg, bn in zip(v.targets, (dir_b_name(part, a), dir_a_name(part, b))):
                     tg.id = arm; tg.bone_target = bn
-                drv.expression = "h * 1.5 * (1 + cos(t / 2)) / max(c, 1e-9) - 1"
+                drv.expression = f"h * 1.5 * (1 + cos(t / 2)) / max(c, 1e-9) - {rest:.6g}"
             else:
                 _v_dist(drv, "d", arm, tip_b_name(part, a), cmp_tip_name(part, k))
                 _v_dist(drv, "w", arm, cmp_name(part, k), cmp_tip_name(part, k))
-                drv.expression = "h * 1.5 * (1 + sqrt(max(0, 1 - d * d / (4 * w * w)))) / max(c, 1e-9) - 1"
+                drv.expression = f"h * 1.5 * (1 + sqrt(max(0, 1 - d * d / (4 * w * w)))) / max(c, 1e-9) - {rest:.6g}"
         # thickness: Scale In/Out X and Z follow the .scale bones' Y scale
         for prop, pt in (("bbone_scalein", a), ("bbone_scaleout", b)):
             for axis in (0, 2):

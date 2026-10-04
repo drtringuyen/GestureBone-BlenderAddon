@@ -3,5 +3,6 @@
   "gesture": true,
   "riglinking": true,
   "expression_sheet": true,
-  "curvechain": true
+  "curvechain": true,
+  "export": true
 }

@@ -159,6 +159,15 @@ class GESTUREBONE_PG_ArmatureProps(bpy.types.PropertyGroup):
         name="Segments per Span",
         description="Plain bones generated per B-Bone span for game export (preview before exporting)",
         default=4, min=1, max=32, override={'LIBRARY_OVERRIDABLE'})
+    export_weights: EnumProperty(
+        name="Export Weights",
+        items=[
+            ('BBONE', "Match B-Bones", "Split each span's weight between its two nearest segment bones, "
+                                       "exactly like Blender deforms on the B-Bone - the export looks like the shot"),
+            ('NODE', "Weight Node", "Let the Bone-weight-Linear node weight the segment bones (live, tunable "
+                                    "on the preview copies)"),
+        ],
+        default='BBONE', override={'LIBRARY_OVERRIDABLE'})
     export_path: StringProperty(
         name="Export Path", subtype='FILE_PATH', default="//export/",
         description="Folder the FBX/glTF files are written to", override={'LIBRARY_OVERRIDABLE'})

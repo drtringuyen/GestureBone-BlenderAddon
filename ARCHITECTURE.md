@@ -120,6 +120,11 @@ addons/GestureBone/
 - `ops_draw.py` — `activate_chain`, `toggle_spline_tool`,
   `switch_curve_direction`, `toggle_constraint_active`
 - `ops_bake.py` — `apply_to_bone`, `delete_baked_frames`
+- `ops_select.py` — `pose_select_linked_ctrl`, `pose_select_linked_ctrl_pick`:
+  Pose-mode Select Linked by `CTRL-{part}` prefix (CTRL bones are not
+  parented, so Blender's chain walk finds nothing). Shadows the default
+  L / Shift+L / Ctrl+L bindings via the addon keymap; grouping lives in
+  `shared/utils.py` (`ctrl_group_key`, `ctrl_bone_side`).
 
 Each module's `register()` registers its **operators**; the **UI draw
 functions are called inline from `panels.py`**, so `ui.py` `register()` is a

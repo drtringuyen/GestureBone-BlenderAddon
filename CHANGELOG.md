@@ -55,6 +55,120 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the current design.
   row; plotting shows a "Registration" box and a wide Auto Rig + icon cluster.
   Presentation-only; verified to draw on both Blender 5.1 and 5.2.
 
+### Added (Sep 2026, cont. 8)
+- **Pose mode: Select Linked for CTRL bones.** `L` over a CTRL bone selects
+  every visible bone of the same `CTRL-{part}` group (`CTRL-Legs_0.End.L` →
+  all `CTRL-Legs*`), `Shift+L` deselects the group, `Ctrl+L` expands the
+  current selection. Both sides are selected by default; a *Same Side Only*
+  redo option keeps `.L`/`.R` apart (centre bones always included). Chain
+  `part_name`s are matched first so `Legs_Front` never collides with `Legs`.
+  Non-CTRL bones fall back to Blender's own select-linked. Also in the Pose
+  *Select* menu; the `L` hotkey is editable from the GESTURE rig panel.
+
+### Fixed (Sep 2026, cont. 7)
+- **Expression Sheet: Sheet / Flip Sheet rows no longer leave empty space
+  around their icons.** `ui.py::_draw_sheet_row` split the row's remainder
+  `0.625 / 0.375` but drew the image field into the first column only and
+  appended the icon cluster as a *sibling* of the split — so the unclaimed
+  second column showed as a gap between the field and the shield/Open icons.
+  Putting the icons in that column closed the gap but exposed a second one:
+  a percentage-width button column is wider than two icon buttons draw, so
+  the remainder trailed off the right end of the row. Both are gone now that
+  the field simply fills (`rest.prop(...)`) and the icon cluster is pinned to
+  `ui_units_x` — one unit per icon button, so it is exactly as wide as it
+  draws and the Open icon is right-flush on every row, with or without the
+  fake-user shield. The rows' right edge now lines up with the Cell Size /
+  Grid Count and `Cell N` rows below them.
+
+### Added (Sep 2026, cont.)
+- **Expression Sheet: Shift+click a grid cell to flip the expression.** Both
+  pickers (the Pose-mode `E` grid and the per-bone panel picker) share the
+  same modal grid widget (`grid.py::_SpriteGridBase`); a plain click still
+  commits the clicked cell index as-is, but holding Shift commits its
+  negation instead, and an "Flipping Expression" label is drawn above the
+  grid while Shift is held so the mirrored pick is visible before you click.
+  Negative `exp_index` was already the established convention downstream —
+  the "UV From Bone (Shared)" geometry-node graph already takes `abs()` of
+  the index for the sprite lookup and switches on its sign to mirror the
+  instance scale — so this just exposes an existing convention as a picker
+  shortcut instead of requiring a manual N-panel edit to negate the value.
+  Verified end-to-end in a live Blender session: direct Python assignment,
+  keyframe insertion/eval, and the modal's sign-flip and label-draw code all
+  checked; the property's `id_properties_ui` hard `min=0` (kept for the
+  N-panel slider's clamp) does not clamp real writes — dict assignment,
+  keyframe playback, and depsgraph evaluation on a negative `exp_index` all
+  held their value in testing.
+
+### Changed (Sep 2026, cont. 6)
+- **Expression Sheet: every Sheet / Flip Sheet row now follows one fixed
+  template** — label at 20% width, the image field at 50%, and the
+  fake-user/Open controls always icon-only, in both Sheet Defaults and
+  every per-bone entry. Replaced `template_ID(..., open="image.open")`
+  (added in cont. 5, below) with a hand-built row (`ui.py::_draw_sheet_row`)
+  plus a new `gesturebone.expression_image_open` operator
+  (`ops_expr_bones.py`) that does the same load-and-assign as the widget's
+  own Open button — `template_ID` only draws Open as an icon once an image
+  is already assigned, and widens to a text button otherwise, which made
+  the row's proportions state-dependent and inconsistent between rows.
+
+### Added (Sep 2026, cont. 5)
+- **Expression Sheet: an "Open" file-browser button next to every Sheet /
+  Flip Sheet field.** `col.prop(...)` / `body.prop(...)` for `sheet_image`
+  and `flip_sheet_image` (Sheet Defaults and every per-bone entry) switched
+  to `template_ID(..., open="image.open")`, so an image can be loaded from
+  disk directly in the panel instead of only picking one already loaded
+  into the file.
+
+### Fixed (Sep 2026, cont. 4)
+- **Expression Sheet: per-bone Cell Size / Grid Count row reordered to match
+  Sheet Defaults** (Cell Size left, Grid Count right — was reversed).
+- **New expression-bone entries now snapshot the current Sheet Defaults**
+  (`grid_size`/`grid_count`) instead of seeding `grid_size` with the `0 =
+  inherit scene default` placeholder — `_add_entry` (`ops_expr_bones.py`).
+- **Picking a cell no longer resets `exp_index`'s N-panel bounds to the full
+  int range.** `_key_expression_change` (`ops_pose_expr.py`) was calling
+  `_ensure_exp_index(pb)` with no `max_index` on every commit, undoing the
+  per-bone `±(grid_count**2 - 1)` clamp set by Add/Sync/opening the grid
+  right after the pick landed. Now resolves and passes the bone's own grid
+  settings on every commit, same as the other call sites.
+
+### Added (Sep 2026, cont. 3)
+- **Expression Sheet: `exp_index` is now library-overridable, so a typed
+  edit survives a linked-override reload, not just a keyed one.**
+  `_ensure_exp_index` (`ops_pose_expr.py`) now calls
+  `pose_bone.property_overridable_library_set('["exp_index"]', True)`
+  every time it runs (Add / Sync / opening the E-grid / the Cell picker).
+  `docs/expression-bones-design.md` had concluded this was impossible in
+  Blender 5.2, but that testing only tried
+  `ob.property_overridable_library_set('pose.bones["X"]["exp_index"]', ...)`
+  through the owning Object with the full nested path, which Blender
+  rejects as "not found" — calling it directly on the PoseBone struct with
+  a path relative to itself works. Verified with a full headless round trip
+  (separate background Blender process, not the live session): flagged the
+  property, linked the object into a fresh file, made a library override,
+  set an UNKEYED value on the override, saved, reopened — it held. A second
+  round trip confirmed the flag also works when set only on the
+  **downstream** override's own local bone (never touched in the source
+  library) — so existing rigs self-heal the next time Add/Sync/the picker
+  runs on them, no source-file edit required. The per-bone panel's linked-
+  override warning in `ui.py` was reworded from "type = lost on reload" to
+  a narrower "run Sync once" nudge for the one remaining case (a bone this
+  fix has never touched).
+
+### Added (Sep 2026, cont. 2)
+- **Expression Sheet: per-bone "Flip Sheet" image, shown as an overlay while
+  Shift is held.** `GESTUREBONE_PG_ExpressionBone` (and the scene-level
+  fallback `GESTUREBONE_PG_Spritesheet`) gained `flip_sheet_image`, drawn as
+  a labeled field ("Sheet" / "Flip Sheet") below the existing sheet image in
+  both the per-bone panel and the Sheet Defaults box. `_SpriteGridBase`
+  (`grid.py`) now loads both textures and swaps which one it draws per-frame
+  based on `event.shift` — no flip sheet set falls back to the normal sheet,
+  so existing rigs render unchanged. The grid's caption above the popup was
+  changed from the Shift-only "Flipping Expression" label to always showing
+  state: "Normal Pose: Hold Shift to Flip the sprite" normally, "Flipped Pose"
+  while Shift is held. The Shift+click commit behavior (negating the picked
+  index) is unchanged — this only changes what image the picker previews.
+
 ### Changed (Sep 2026)
 - **Expression Sheet: picking a cell now keys the current frame only.** Both
   pickers (the Pose-mode `E` grid and the per-bone panel picker) used to write

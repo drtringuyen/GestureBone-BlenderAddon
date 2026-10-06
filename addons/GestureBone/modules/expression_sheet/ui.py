@@ -34,7 +34,8 @@ class GESTUREBONE_PT_ExpressionSheet(bpy.types.Panel):
         row = col.row(align=True)
         row.prop(props, "grid_size")
         row.prop(props, "grid_count")
-        col.prop(props, "sheet_image", text="")
+        self._draw_sheet_row(col, props, "sheet_image", "Sheet", -1)
+        self._draw_sheet_row(col, props, "flip_sheet_image", "Flip Sheet", -1)
 
         layout.separator()
 
@@ -62,6 +63,44 @@ class GESTUREBONE_PT_ExpressionSheet(bpy.types.Panel):
         col.label(text="Shader Editor > Add:", icon='NODETREE')
         col.label(text="- UV From Bone (Shared)", icon='UV')
 
+    # -- One Sheet / Flip Sheet field, fixed proportions -------------------
+
+    def _draw_sheet_row(self, layout, data, field, label, entry_index):
+        """label 20% / image field fills / icon-only fake-user+Open buttons —
+        the same template for Sheet Defaults and every per-bone entry.
+
+        Built by hand rather than via ``template_ID(open=...)``: that widget
+        only draws Open as an icon once an image is already assigned — with
+        nothing assigned yet it draws a wide "Open" text button instead,
+        which breaks a fixed layout that has to look the same in both states.
+        ``gesturebone.expression_image_open`` (ops_expr_bones.py) is the same
+        load-and-assign behavior as an icon-only button.
+        """
+        row = layout.row(align=True)
+        label_split = row.split(factor=0.2, align=True)
+        label_split.label(text=label)
+        rest = label_split.row(align=True)
+        rest.prop(data, field, text="")
+
+        # One ui_unit per icon button, so the cluster is exactly as wide as it
+        # draws and ends flush with the row: a percentage-split button column
+        # is wider than the icons, and the leftover trails off the right edge.
+        # The field takes whatever is left, so the Open icon stays right-
+        # aligned across rows whether or not the shield is there.
+        img = getattr(data, field)
+        btn_row = rest.row(align=True)
+        btn_row.ui_units_x = 2.0 if img is not None else 1.0
+        if img is not None:
+            # Always the OFF icon: ``use_fake_user`` is registered with
+            # consecutive icons, so Blender itself draws FAKE_USER_ON when the
+            # value is set. Passing FAKE_USER_ON here would make it draw the
+            # icon *after* that one in the enum instead of the checked shield.
+            btn_row.prop(img, "use_fake_user", text="", icon='FAKE_USER_OFF')
+        op = btn_row.operator("gesturebone.expression_image_open", text="",
+                              icon='FILEBROWSER')
+        op.field = field
+        op.entry_index = entry_index
+
     # -- Expression bone registry ------------------------------------------
 
     def _draw_expression_bones(self, context, layout):
@@ -82,16 +121,18 @@ class GESTUREBONE_PT_ExpressionSheet(bpy.types.Panel):
             layout.label(text="Select bones in Pose mode, then +", icon='INFO')
             return
 
-        # An unkeyed value on an override reverts to the library's on reload,
-        # and the addon cannot mark a pose-bone custom property overridable
-        # (Blender exposes no scriptable path — see the design doc). The picker
-        # below always keys; a value typed straight into the field does not, so
-        # say so rather than letting the edit quietly disappear.
+        # exp_index is flagged library-overridable by _ensure_exp_index (see
+        # ops_pose_expr.py) the first time Add/Sync/the E-grid/the Cell picker
+        # touches a bone, so a typed edit sticks across reload from then on.
+        # A bone this session hasn't touched yet (a very old entry, before
+        # this flag existed, on a file that hasn't run Sync since) may not
+        # have it set — nudge toward Sync rather than let a typed edit quietly
+        # disappear on reload in that one remaining case.
         if arm.override_library is not None:
             warn = layout.box().column(align=True)
-            warn.label(text="Linked override: type = lost on reload.",
-                       icon='ERROR')
-            warn.label(text="Use the Cell picker (it keys).")
+            warn.label(text="Linked override: run Sync once if a typed",
+                       icon='INFO')
+            warn.label(text="edit doesn't stick after reload.")
 
         for i, entry in enumerate(entries):
             pb = arm.pose.bones.get(entry.bone)
@@ -131,10 +172,12 @@ class GESTUREBONE_PT_ExpressionSheet(bpy.types.Panel):
             if pb is None:
                 body.label(text="Bone missing — rename or re-sync", icon='ERROR')
 
-            body.prop(entry, "sheet_image", text="")
+            self._draw_sheet_row(body, entry, "sheet_image", "Sheet", i)
+            self._draw_sheet_row(body, entry, "flip_sheet_image", "Flip Sheet", i)
+            # Cell Size left, Grid Count right — same order as Sheet Defaults.
             grid_row = body.row(align=True)
-            grid_row.prop(entry, "grid_count")
             grid_row.prop(entry, "grid_size")
+            grid_row.prop(entry, "grid_count")
 
             # Reordering is cosmetic (nothing reads the list order), so the
             # arrows live down here rather than competing with the bone name.

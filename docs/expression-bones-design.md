@@ -166,10 +166,10 @@ running `override_hierarchy_create`, saving, and reopening.
 **Requirement met:** `exp_index` can be keyed on an override and can drive other
 things in the linked file, with no change to the current design.
 
-### The unkeyed gap, and why the addon cannot close it
+### The unkeyed gap — RESOLVED (2026-09-07)
 
-On Blender 5.2 there is **no scriptable way** to set the library-overridable
-flag on a pose-bone custom property:
+Earlier testing (below) concluded there was **no scriptable way** to set the
+library-overridable flag on a pose-bone custom property:
 
 ```
 ob.property_overridable_library_set('["obj_level_prop"]', True)    → True   ✓
@@ -181,20 +181,38 @@ bpy.ops.wm.properties_edit(...)        → RuntimeError: Direct execution not su
 pb.id_properties_ui("exp_index").as_dict()                         → no override key
 ```
 
-`property_overridable_library_set` / `is_property_overridable_library` accept
-only properties **directly on the ID**; nested paths are rejected even when
-`path_resolve` handles them. `wm.properties_edit` — the operator behind the UI's
-"Library Overridable" checkbox — is invoke-only.
+That conclusion was wrong — the testing only ever called
+`property_overridable_library_set` / `is_property_overridable_library`
+**through the owning Object** with the full nested path
+(`ob.property_overridable_library_set('pose.bones["X"]["exp_index"]', ...)`),
+which Blender genuinely rejects as "not found". Calling the same method
+**directly on the PoseBone struct**, with a property path relative to itself,
+works fine:
 
-So: a one-time manual tick per expression bone in the **source** rig
-(right-click the property → Edit Property → Library Overridable), or accept that
-only keyed values persist.
+```
+pb.property_overridable_library_set('["exp_index"]', True)   → True   ✓
+pb.is_property_overridable_library('["exp_index"]')          → True   ✓
+```
 
-**Design consequence — do not skip this.** In the new per-bone panel, typing an
-index is a static edit. On an override it will appear to work and then revert on
-reload. The index field must **key on change** when
-`arm_obj.override_library is not None`, or show an inline warning. Otherwise the
-feature ships a silent data-loss trap.
+Verified with a full headless round trip (separate background Blender
+process): flag set on a source-file bone → object linked into a fresh file →
+`bpy.ops.object.make_override_library()` → an **unkeyed** static edit on the
+override's `exp_index` → save → reopen — the edit held. A second round trip
+confirmed the flag also works when set only on the **downstream** override's
+own local bone (never touched in the source library) — the flag doesn't need
+to pre-exist upstream; setting it anywhere the property lives is enough.
+
+`_ensure_exp_index` (`ops_pose_expr.py`) now calls
+`pose_bone.property_overridable_library_set('["exp_index"]', True)` every
+time it runs (Add / Sync / opening the E-grid / the Cell picker), so any rig
+touched by this addon self-heals into the overridable state — no manual
+per-bone tick in the source rig required.
+
+**Design consequence (superseded):** the per-bone panel's index field still
+keys on every picker commit (unchanged — keying is still the CONSTANT-channel
+animation workflow this whole module is built around), but a **typed** edit on
+an override no longer needs to be treated as doomed to revert. The panel's
+warning was narrowed accordingly — see `ui.py`.
 
 ### The image pointer
 

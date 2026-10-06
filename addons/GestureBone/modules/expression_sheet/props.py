@@ -36,6 +36,12 @@ class GESTUREBONE_PG_Spritesheet(PropertyGroup):
         description="Sprite-sheet image shown when a bone has no sheet of its own",
         type=bpy.types.Image,
     )
+    flip_sheet_image: PointerProperty(
+        name="Flip Sheet",
+        description="Sprite-sheet image shown while Shift is held, when a bone "
+                    "has no flip sheet of its own",
+        type=bpy.types.Image,
+    )
 
 
 # ── Per-bone resolution ───────────────────────────────────────────────────────
@@ -44,15 +50,18 @@ class GESTUREBONE_PG_Spritesheet(PropertyGroup):
 # three values, and a resolved snapshot can blend per-bone and scene sources
 # without either having to know about the other.
 class GridSettings(tuple):
-    """(cell_px, grid_count, image) — what the grid widget needs to draw."""
+    """(cell_px, grid_count, image, flip_image) — what the grid widget needs
+    to draw. flip_image is what's shown while Shift is held; it is never None
+    (falls back to image) so the widget can always just pick one or the other."""
     __slots__ = ()
 
-    def __new__(cls, cell_px, grid_count, image):
-        return super().__new__(cls, (cell_px, grid_count, image))
+    def __new__(cls, cell_px, grid_count, image, flip_image):
+        return super().__new__(cls, (cell_px, grid_count, image, flip_image or image))
 
     cell_px    = property(lambda self: self[0])
     grid_count = property(lambda self: self[1])
     image      = property(lambda self: self[2])
+    flip_image = property(lambda self: self[3])
 
     @property
     def max_index(self):
@@ -88,10 +97,12 @@ def resolve_grid(arm_obj, bone_name, context=None):
     scn = scene_props(context)
     entry = find_entry(arm_obj, bone_name)
     if entry is None:
-        return GridSettings(scn.grid_size, scn.grid_count, scn.sheet_image)
+        return GridSettings(scn.grid_size, scn.grid_count, scn.sheet_image,
+                            scn.flip_sheet_image)
     return GridSettings(entry.grid_size or scn.grid_size,
                         entry.grid_count,
-                        entry.sheet_image or scn.sheet_image)
+                        entry.sheet_image or scn.sheet_image,
+                        entry.flip_sheet_image or scn.flip_sheet_image)
 
 
 def register():

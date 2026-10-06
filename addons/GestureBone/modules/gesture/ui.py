@@ -10,6 +10,7 @@ unchanged from the rearchitected backend.
 import bpy
 from ..shared.utils import _arm, _chains_for_gesture_rig, _validate_plotting_rig
 from ..shared.utils_constraints import _constraints_exist, _constraints_are_muted
+from .ops_select import get_keymap_item
 
 
 def draw_gesture_ui(layout, context, arm):
@@ -42,6 +43,14 @@ def draw_gesture_ui(layout, context, arm):
         draw_convert_box(layout, arm)
     except ImportError:
         pass
+
+    # ── Pose-mode Select Linked CTRL hotkey ───────────────────────────────────
+    found = get_keymap_item()
+    if found:
+        _, kmi = found
+        row = layout.row(align=True)
+        row.label(text="Select Linked CTRL (Pose):")
+        row.prop(kmi, "type", text="", full_event=True)
 
     # ── Load Chains button ────────────────────────────────────────────────────
     load_row = layout.row(align=True)

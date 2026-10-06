@@ -119,9 +119,13 @@ class _SpriteGridBase(bpy.types.Operator):
         self._rect = (x1 - side, y1 - side, x1, y1)
 
         img = settings.image
-        self._tex    = gpu.texture.from_image(img) if img is not None else None
+        flip_img = settings.flip_image
+        self._tex      = gpu.texture.from_image(img) if img is not None else None
+        self._tex_flip = (gpu.texture.from_image(flip_img)
+                          if flip_img is not None else self._tex)
         self._chosen = self._seed_chosen(context)
         self._hover  = -1
+        self._shift  = False
 
         self._handler = bpy.types.SpaceView3D.draw_handler_add(
             self._draw_px, (context,), 'WINDOW', 'POST_PIXEL')
@@ -143,6 +147,10 @@ class _SpriteGridBase(bpy.types.Operator):
         rx = event.mouse_x - self._region.x
         ry = event.mouse_y - self._region.y
 
+        if event.shift != self._shift:
+            self._shift = event.shift
+            self._region.tag_redraw()
+
         if event.type in {'MOUSEMOVE', 'INBETWEEN_MOUSEMOVE'}:
             hov = self._pick(rx, ry)
             if hov != self._hover:
@@ -153,7 +161,10 @@ class _SpriteGridBase(bpy.types.Operator):
         if event.type == 'LEFTMOUSE' and event.value == 'PRESS':
             idx = self._pick(rx, ry)
             if idx >= 0:
-                self._commit(context, idx)
+                # Shift+click flips the expression (mirrored sprite): the same
+                # cell index, negated, so downstream code can tell a mirrored
+                # pick from a plain one without a second custom property.
+                self._commit(context, -idx if event.shift else idx)
                 return self._finish(context)
             x0, y0, x1, y1 = self._rect
             if not (x0 <= rx <= x1 and y0 <= ry <= y1):
@@ -179,11 +190,13 @@ class _SpriteGridBase(bpy.types.Operator):
         _fill_rect(col_sh, x0, y0, x1, y1, (0.08, 0.08, 0.09, 0.97))
         _border_rect(col_sh, x0, y0, x1, y1, (0.25, 0.25, 0.27, 1.0), 1)
 
+        tex = self._tex_flip if self._shift else self._tex
+
         gc = self._gc
         for idx in range(gc * gc):
             cx0, cy0, cx1, cy1 = self._cell_rect(idx)
 
-            if self._tex is not None:
+            if tex is not None:
                 # full-bleed image slice: cell quad textured with its UV subrect
                 img_sh = gpu.shader.from_builtin('IMAGE')
                 u0 = (idx %  gc) / gc
@@ -196,7 +209,7 @@ class _SpriteGridBase(bpy.types.Operator):
                                  (u0, v0), (u1, v1), (u0, v1)],
                 })
                 img_sh.bind()
-                img_sh.uniform_sampler("image", self._tex)
+                img_sh.uniform_sampler("image", tex)
                 batch.draw(img_sh)
             else:
                 _fill_rect(col_sh, cx0, cy0, cx1, cy1, (0.22, 0.22, 0.23, 1.0))
@@ -214,5 +227,17 @@ class _SpriteGridBase(bpy.types.Operator):
             elif idx == self._hover:
                 _border_rect(col_sh, cx0, cy0, cx1, cy1,
                              (1.0, 1.0, 1.0, 0.7), max(1, int(1 * self._ui)))
+
+        if self._shift:
+            txt = "Flipped Pose"
+            color = (1.0, 0.6, 0.2, 1.0)
+        else:
+            txt = "Normal Pose: Hold Shift to Flip the sprite"
+            color = (0.85, 0.85, 0.85, 1.0)
+        blf.size(0, int(14 * self._ui))
+        tw, th = blf.dimensions(0, txt)
+        blf.position(0, (x0 + x1) / 2 - tw / 2, y1 + int(6 * self._ui), 0)
+        blf.color(0, *color)
+        blf.draw(0, txt)
 
         gpu.state.blend_set('NONE')

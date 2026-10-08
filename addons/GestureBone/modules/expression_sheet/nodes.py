@@ -713,6 +713,14 @@ def _remove_attr_feeds(node, keep_suffixes=()):
                 pass
 
 
+def _own_satellite_names(node):
+    """Tree identities of every satellite feed node this instance owns, across
+    BOTH schemas plus the UV Map feed. These are the only sources a refresh is
+    ever allowed to disconnect -- see the wiring loop in _ensure_attr_feed."""
+    return ({node.name + s for s in ALL_ATTR_SUFFIXES}
+            | {node.name + UVFB_UVMAP_SUFFIX})
+
+
 def _ensure_attr_feed(node, suffix, prop_key, wiring, y_offset, collapse=True):
     """Create/repoint one Attribute feed and wire its outputs into the node.
 
@@ -753,6 +761,16 @@ def _ensure_attr_feed(node, suffix, prop_key, wiring, y_offset, collapse=True):
     # Collapsed: the node shows nothing but a machine-generated property name,
     # so it draws as a small pill instead of a full box.
     attr.hide = collapse
+    # Only ever (re)connect a socket that is EMPTY or still fed by one of this
+    # instance's own satellites. Anything else in that socket is a deliberate
+    # user edit -- a maths chain patched in front of Bone UV, say -- and the
+    # old unconditional links.new() silently destroyed it on every refresh,
+    # including the automatic one every file open runs (see
+    # migrate_legacy_drivers / the load_post handler), so the user's rewire
+    # survived a save but never survived the reopen. Repointing a stale
+    # satellite -- which is the self-heal this loop actually exists for -- is
+    # unaffected: those sources are all in _own_satellite_names.
+    own = _own_satellite_names(node)
     for out_name, socket_name in wiring:
         sock = node.inputs.get(socket_name)
         if sock is None:
@@ -760,8 +778,12 @@ def _ensure_attr_feed(node, suffix, prop_key, wiring, y_offset, collapse=True):
         out_socket = attr.outputs.get(out_name)
         if out_socket is None:
             continue
-        if sock.links and sock.links[0].from_socket == out_socket:
-            continue
+        if sock.links:
+            link = sock.links[0]
+            if link.from_socket == out_socket:
+                continue
+            if link.from_node.name not in own:
+                continue
         container.links.new(out_socket, sock)
 
 

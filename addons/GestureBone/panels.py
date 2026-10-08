@@ -83,8 +83,8 @@ class GESTUREBONE_PT_MainPanel(bpy.types.Panel):
         scene_gp  = context.scene.gesturebone_props
 
         active = context.active_object
-        if active and active.type == 'ARMATURE' and active.gesturebone_props.rig_type == 'GESTURE':
-            # GESTURE rig is directly selected
+        if active and active.type == 'ARMATURE' and active.gesturebone_props.rig_type in {'GESTURE', 'UNIFIED'}:
+            # GESTURE / single rig is directly selected
             arm = active
         elif active and active.type == 'CURVE':
             # Active object is a curve — check if it's a GestureSpline belonging to a GESTURE rig.
@@ -112,6 +112,7 @@ class GESTUREBONE_PT_MainPanel(bpy.types.Panel):
         type_label = {
             'PLOTTING': "PLOTTING",
             'GESTURE':  "GESTURE",
+            'UNIFIED':  "SINGLE RIG",
             'PRESET':   "PRESET",
             'NONE':     "Untagged",
         }.get(rig_type, "Untagged")
@@ -135,6 +136,13 @@ class GESTUREBONE_PT_MainPanel(bpy.types.Panel):
                 draw_gesture_ui(layout, context, arm)
             except ImportError:
                 layout.label(text="gesture module not loaded", icon='ERROR')
+
+        elif rig_type == 'UNIFIED':
+            try:
+                from .modules.curvechain.ui import draw_unified_ui
+                draw_unified_ui(layout, context, arm)
+            except ImportError:
+                layout.label(text="curvechain module not loaded", icon='ERROR')
 
         elif rig_type == 'PRESET':
             box = layout.box()

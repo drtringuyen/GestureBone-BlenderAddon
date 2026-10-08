@@ -15,6 +15,7 @@ GestureBone works with **two cooperating armatures** per character:
 |------|----------------|-------|---------|
 | **PLOTTING** rig (the "MetaRig") | `CHR_LittlePig` | META bones + the **chain definitions** | Rig generation — turns META bones into curve-driven control chains |
 | **GESTURE** rig | `CHR_LittlePig.Gesture` | CTRL bones | Gesture drawing & binding — draw a spline, bake it onto the control bones |
+| **UNIFIED** rig (research) | `CHR_LittlePig.Gesture` after conversion | everything above in one armature | Annotate-drawn, no curves / GN — see §8b |
 
 Each armature is tagged by `arm.gesturebone_props.rig_type`, one of
 `PLOTTING`, `GESTURE`, `PRESET` (a template shown in the *Create Rig*
@@ -216,6 +217,29 @@ only enables once the previous one has run. **Auto Rig** runs the whole thing;
   (read-only), which only affects tooling, not the addon.
 
 ---
+
+## 8b. Single rig (research branch)
+
+`modules/curvechain/` adds a third rig type, `UNIFIED`. It is one armature
+holding the CTRL bones, the B-Bone span machinery that replaces both splines
+and their GN, and the unchanged STR→AXIS→SIZE→DEF stack.
+
+- **`builder.py`:** span bones, ease/arc-length/sampler drivers.
+- **`convert.py`:** the two-rig → one-rig converter.
+- **`fit.py`:** stroke → pose.
+- **`ops.py`, `ui.py`:** the UI is dispatched from `panels.py` like the
+  others.
+
+`modules/export/` is drawn inside the UNIFIED UI. It contains:
+
+- **`weights.py`:** Bake/Live of the Bone-weight-Linear result.
+- **`weight_nodes.py`:** the `BDEF-` prefix branch on that node.
+- **`optimize.py`:** Blender Optimized; B-Bone spans deform as `BDEF-*`.
+- **`gamerig.py`:** the temporary segment-bone export rig, FBX/glTF.
+- **`ops.py`, `ui.py`:** the operators (including Repair ANIM File) and the
+  Export box.
+
+Full write-up: [docs/single-rig-design.md](docs/single-rig-design.md).
 
 ## 9. History
 

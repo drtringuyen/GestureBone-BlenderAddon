@@ -260,8 +260,19 @@ class GESTUREBONE_OT_AutoRig(bpy.types.Operator):
             context.view_layer.objects.active = gesture_arm
             bpy.ops.gesturebone.load_chains()
 
+        single = props.auto_single_rig
+        if single and gesture_arm:
+            # Finalise as ONE armature: the PLOTTING rig is merged into the
+            # gesture rig and stops existing — `arm` must not be touched below.
+            from ..curvechain import convert as _cv
+            _ensure_object_mode(context)
+            plan = _cv.convert(gesture_arm, plane='ROOT')
+            for e in plan["errors"]:
+                self.report({'WARNING'}, e)
+
         _activate_in_pose_mode(context, gesture_arm)
-        self.report({'INFO'}, f"Auto Rig complete — {done}/{total} bones processed")
+        self.report({'INFO'}, f"Auto Rig complete — {done}/{total} bones processed"
+                              + (" — single rig" if single and gesture_arm else ""))
         return {'FINISHED'}
 
 

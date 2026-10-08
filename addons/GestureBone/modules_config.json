@@ -2,5 +2,7 @@
   "plotting": true,
   "gesture": true,
   "riglinking": true,
-  "expression_sheet": true
+  "expression_sheet": true,
+  "curvechain": true,
+  "export": true
 }

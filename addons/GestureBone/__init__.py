@@ -29,7 +29,7 @@ def _track_active_armature(scene, depsgraph):
     try:
         gp    = scene.gesturebone_props
         rtype = obj.gesturebone_props.rig_type
-        if rtype == 'PLOTTING':
+        if rtype in {'PLOTTING', 'UNIFIED'}:
             gp.current_armature = obj
         elif rtype == 'GESTURE':
             plotting = obj.gesturebone_props.plotting_rig

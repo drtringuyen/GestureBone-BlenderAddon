@@ -38,6 +38,12 @@ def draw_gesture_ui(layout, context, arm):
     header_row.label(text=f"Plotting Rig: {plotting.name}", icon='ARMATURE_DATA')
     header_row.operator("gesturebone.switch_armature", text="", icon='ARROW_LEFTRIGHT')
 
+    try:
+        from ..curvechain.ui import draw_convert_box
+        draw_convert_box(layout, arm)
+    except ImportError:
+        pass
+
     # ── Pose-mode Select Linked CTRL hotkey ───────────────────────────────────
     found = get_keymap_item()
     if found:

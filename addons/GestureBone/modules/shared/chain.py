@@ -136,6 +136,22 @@ def _on_handle_smoothness_update(self, context):
             break
 
 
+def _on_layer_depth_update(self, context):
+    arm = self.id_data
+    if getattr(arm, "type", None) != 'ARMATURE':
+        return
+    try:
+        from ..curvechain.builder import apply_layer_depth, chain_indices
+        from ..export import optimize
+    except ImportError:
+        return
+    if optimize.deform_mode(arm) == optimize.MODE_BBONE:
+        optimize.apply_layer_depth(arm, self.part_name, chain_indices(self), self.layer_depth)
+    else:
+        apply_layer_depth(arm, self.part_name, self.layer_depth)
+    arm.update_tag()
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _resize_collection(coll, count):
@@ -255,6 +271,31 @@ class GESTUREBONE_PG_ChainDefinition(bpy.types.PropertyGroup):
     is_bound: BoolProperty(name="Bound", default=False, override={'LIBRARY_OVERRIDABLE'})
     is_drawing: BoolProperty(name="Drawing", default=False, override={'LIBRARY_OVERRIDABLE'})
     drawing_frame: IntProperty(name="Drawing Frame", default=-1, override={'LIBRARY_OVERRIDABLE'})
+
+    # ── Single rig (curvechain) ────────────────────────────────────────────────
+    plane_space: EnumProperty(
+        name="Plane",
+        description="Which plane the chain is flattened onto and which way its bones face",
+        items=[
+            ('ROOT', "Root Bone", "Follow the chain's Rotation/Pivot bone — rotating it tilts the plane"),
+            ('ARMATURE', "Armature", "Fixed armature front plane (-Y), like the old Geometry Nodes rig"),
+        ],
+        default='ROOT',
+        override={'LIBRARY_OVERRIDABLE'},
+    )
+
+    layer_depth: FloatProperty(
+        name="Layer Depth",
+        description="Root Bone plane only: push the chain toward the camera, from 0 at its first point to "
+                    "this distance at its last, so where the chain crosses itself (legs passing) the later "
+                    "part draws in front instead of cutting through or z-fighting (negative: the "
+                    "first part in front)",
+        # non-zero by default: projecting a chain makes it exactly coplanar, so
+        # any self-overlap (legs passing, both feet together) would z-fight
+        default=0.01, soft_min=-0.1, soft_max=0.1, step=0.1, precision=3, subtype='DISTANCE',
+        update=lambda self, ctx: _on_layer_depth_update(self, ctx),
+        override={'LIBRARY_OVERRIDABLE'},
+    )
 
     # ── UI collapse state ──────────────────────────────────────────────────────
     ui_expanded: BoolProperty(name="Expanded", default=False, override={'LIBRARY_OVERRIDABLE'})

@@ -1,0 +1,341 @@
+"""
+curvechain/convert.py — Fold a two-rig character (PLOTTING MetaPlot + GESTURE
+rig + per-chain Gesture/Plotting splines) into ONE armature.
+
+Direction of the merge is deliberate: the MetaPlot's deform stack goes INTO the
+GESTURE rig, because the Gesture rig is what the animation (its action), the
+Expression Sheet drivers and every other rig's constraints already point at.
+Nothing animator-facing has to be re-targeted.
+
+Order:
+  1. collect: chains, sampler (STR) bones per chain from their GEOMETRY_ATTRIBUTE
+     sample_index, splines to delete
+  2. copy chain definitions PLOTTING → GESTURE
+  3. re-point meshes (Armature modifiers, parenting) MetaPlot → Gesture
+  4. join MetaPlot into Gesture (no bone-name collisions allowed)
+  5. rename .hL/.hR → .hA/.hB and .End.L/.End.R → .End.A/.End.B on the gesture
+     side (Blender fixes fcurve paths, constraint subtargets and drivers)
+  6. per chain: build_chain(), rebind samplers, drop the old spline constraints
+  7. delete the chain splines (GN node groups are left for Purge — templates
+     still use them)
+"""
+import re
+import bpy
+
+from . import builder
+
+UNIFIED = 'UNIFIED'
+_RENAMES = ((re.compile(r"\.hL$"), ".hA"), (re.compile(r"\.hR$"), ".hB"),
+            (re.compile(r"\.End\.L$"), ".End.A"), (re.compile(r"\.End\.R$"), ".End.B"))
+_RENAME_PREFIXES = ("CTRL-", "CONNECT-", "LIMIT-")
+
+
+def _copy_pg(src, dst):
+    for prop in src.bl_rna.properties:
+        pid = prop.identifier
+        if pid == "rna_type":
+            continue
+        if prop.type == 'COLLECTION':
+            sc, dc = getattr(src, pid), getattr(dst, pid)
+            dc.clear()
+            for item in sc:
+                _copy_pg(item, dc.add())
+        elif prop.is_readonly:
+            continue
+        else:
+            try:
+                setattr(dst, pid, getattr(src, pid))
+            except (AttributeError, TypeError):
+                pass
+
+
+def collect(gesture):
+    """Read-only plan of the conversion. Returns a dict; 'errors' non-empty
+    means convert() will refuse."""
+    props = gesture.gesturebone_props
+    plotting = props.plotting_rig
+    plan = {"gesture": gesture.name, "plotting": plotting.name if plotting else None,
+            "chains": [], "errors": [], "meshes": [], "splines": []}
+    if props.rig_type != 'GESTURE':
+        plan["errors"].append(f"'{gesture.name}' is not a GESTURE rig")
+        return plan
+    if plotting is None or plotting.gesturebone_props.rig_type != 'PLOTTING':
+        plan["errors"].append("plotting_rig is not set to a PLOTTING rig")
+        return plan
+    clash = sorted(set(gesture.data.bones.keys()) & set(plotting.data.bones.keys()))
+    if clash:
+        plan["errors"].append(f"bone names exist on both rigs: {clash[:8]}")
+    if gesture.matrix_world != plotting.matrix_world:
+        plan["errors"].append("the two rigs have different object transforms")
+
+    gesture_eval_dg = bpy.context.evaluated_depsgraph_get()
+    for chain in plotting.gesturebone_props.chains:
+        part = chain.part_name
+        indices = builder.chain_indices(chain)
+        # spline objects are named after the character, not the MetaPlot
+        # ("CHR_X-Arm.L.PlottingSpline"), so trust the chain pointers first
+        base = plotting.name.rsplit(".", 1)[0]
+        plot_spline = (chain.plotting_spline
+                       or bpy.data.objects.get(f"{base}-{part}.PlottingSpline")
+                       or bpy.data.objects.get(f"{plotting.name}-{part}.PlottingSpline"))
+        gest_spline = (chain.gesture_spline
+                       or bpy.data.objects.get(f"{base}-{part}.GestureSpline")
+                       or bpy.data.objects.get(f"{plotting.name}-{part}.GestureSpline"))
+        samplers = {}
+        for pb in plotting.pose.bones:
+            for c in pb.constraints:
+                if c.type == 'GEOMETRY_ATTRIBUTE' and plot_spline is not None and c.target == plot_spline:
+                    samplers[c.sample_index] = pb.name
+        order = [samplers[i] for i in sorted(samplers)]
+        # which way the old GN faced each sampler (X toward +normal or -normal)
+        normal = builder.WORLD_NORMAL_HINT
+        facing = {}
+        pl_eval = plotting.evaluated_get(gesture_eval_dg)
+        for name in order:
+            x = (plotting.matrix_world @ pl_eval.pose.bones[name].matrix).to_3x3().col[0].normalized()
+            facing[name] = 'TRACK_X' if x.dot(normal) >= 0 else 'TRACK_NEGATIVE_X'
+        plan["chains"].append({"part": part, "indices": indices, "samplers": order, "facing": facing,
+                               "sample_count": (max(samplers) + 1) if samplers else 0})
+        if not samplers:
+            plan["errors"].append(f"{part}: no sampler bones read from a PlottingSpline")
+        elif sorted(samplers) != list(range(max(samplers) + 1)):
+            plan["errors"].append(f"{part}: sampler indices have gaps {sorted(samplers)}")
+        for ob in (gest_spline, plot_spline):
+            if ob is not None and ob.type == 'CURVE' and ob.name not in plan["splines"]:
+                plan["splines"].append(ob.name)
+
+    for ob in bpy.data.objects:
+        if ob.type != 'MESH':
+            continue
+        uses = any(m.type == 'ARMATURE' and m.object == plotting for m in ob.modifiers) or ob.parent == plotting
+        if uses:
+            plan["meshes"].append(ob.name)
+    return plan
+
+
+def _rename_handles(arm):
+    renamed = {}
+    for b in list(arm.data.bones):
+        if not b.name.startswith(_RENAME_PREFIXES):
+            continue
+        new = b.name
+        for rx, rep in _RENAMES:
+            new = rx.sub(rep, new)
+        if new != b.name and not arm.data.bones.get(new):
+            old = b.name
+            b.name = new
+            renamed[old] = new
+    return renamed
+
+
+def _anim_state(ob):
+    ad = ob.animation_data
+    if ad is None:
+        return None
+    slot = getattr(ad, "action_slot", None)
+    return {"action": ad.action,
+            "slot": slot.identifier if slot else None,
+            "nla": [(t.name, len(t.strips), t.mute) for t in ad.nla_tracks]}
+
+
+def _restore_anim(ob, state):
+    """object.join() drops the active action's slot assignment (Blender 5.x),
+    which silently stops the animation from playing — put it back."""
+    if not state or state["action"] is None:
+        return True
+    ad = ob.animation_data or ob.animation_data_create()
+    if ad.action != state["action"]:
+        ad.action = state["action"]
+    if state["slot"] and hasattr(ad, "action_slot"):
+        slot = next((s for s in state["action"].slots if s.identifier == state["slot"]), None)
+        if slot is not None and ad.action_slot != slot:
+            ad.action_slot = slot
+    now = [(t.name, len(t.strips), t.mute) for t in ad.nla_tracks]
+    return now == state["nla"] and (not state["slot"] or (ad.action_slot and ad.action_slot.identifier == state["slot"]))
+
+
+def _remap_users(old, new):
+    """Point every Armature modifier, parent link, GN Object input and driver
+    target that uses `old` at `new`. Returns a list of what was changed."""
+    from ..shared.utils_gn import _get_gn_input, _set_gn_input
+    done = []
+    for ob in bpy.data.objects:
+        if ob is old or ob is new:
+            continue
+        for md in getattr(ob, "modifiers", []):
+            if md.type == 'ARMATURE' and md.object == old:
+                md.object = new
+                done.append(f"{ob.name}:{md.name}")
+            elif md.type == 'NODES' and md.node_group:
+                for it in md.node_group.interface.items_tree:
+                    if getattr(it, "in_out", None) != 'INPUT' or getattr(it, "socket_type", "") != 'NodeSocketObject':
+                        continue
+                    if _get_gn_input(md, it.identifier) == old and _set_gn_input(md, it.identifier, new):
+                        done.append(f"{ob.name}:{md.name}[{it.name}]")
+        if ob.parent == old:
+            mw = ob.matrix_world.copy()
+            ob.parent = new
+            ob.matrix_world = mw
+            done.append(f"{ob.name}:parent")
+        for owner in (ob, getattr(ob, "data", None)):
+            ad = getattr(owner, "animation_data", None) if owner is not None else None
+            for fc in (ad.drivers if ad else []):
+                for v in fc.driver.variables:
+                    for t in v.targets:
+                        if t.id == old:
+                            t.id = new
+                            done.append(f"{owner.name}:{fc.data_path}")
+    # addon property groups (scene current_armature, other rigs' plotting_rig, …)
+    for owner in list(bpy.data.scenes) + list(bpy.data.objects):
+        if owner is old:
+            continue
+        for attr in [a for a in dir(owner) if a.endswith("_props")]:
+            pg = getattr(owner, attr, None)
+            if isinstance(pg, bpy.types.PropertyGroup):
+                done += [f"{owner.name}:{attr}.{p}" for p in _remap_pg(pg, old, new)]
+    return done
+
+
+def _remap_pg(pg, old, new, depth=0):
+    hits = []
+    if depth > 4:
+        return hits
+    for prop in pg.bl_rna.properties:
+        pid = prop.identifier
+        try:
+            val = getattr(pg, pid)
+        except AttributeError:      # stale RNA from an older registration
+            continue
+        if prop.type == 'POINTER':
+            if val is old and not prop.is_readonly:
+                setattr(pg, pid, new)
+                hits.append(pid)
+            elif isinstance(val, bpy.types.PropertyGroup):
+                hits += [f"{pid}.{h}" for h in _remap_pg(val, old, new, depth + 1)]
+        elif prop.type == 'COLLECTION':
+            for i, item in enumerate(val):
+                if isinstance(item, bpy.types.PropertyGroup):
+                    hits += [f"{pid}[{i}].{h}" for h in _remap_pg(item, old, new, depth + 1)]
+    return hits
+
+
+def _join(gesture, plotting):
+    ctx = bpy.context
+    if ctx.object and ctx.object.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+    for ob in ctx.view_layer.objects:
+        ob.select_set(False)
+    for ob in (gesture, plotting):
+        ob.hide_set(False)
+        ob.hide_viewport = False
+        ob.select_set(True)
+    ctx.view_layer.objects.active = gesture
+    with ctx.temp_override(active_object=gesture, object=gesture,
+                           selected_objects=[gesture, plotting],
+                           selected_editable_objects=[gesture, plotting]):
+        bpy.ops.object.join()
+
+
+def convert(gesture, delete_splines=True, spacing='UNIFORM', plane='ROOT'):
+    """Run the conversion in place. Returns the report dict."""
+    plan = collect(gesture)
+    if plan["errors"]:
+        return plan
+    plotting = gesture.gesturebone_props.plotting_rig
+    plotting_name = plotting.name
+    gprops = gesture.gesturebone_props
+
+    # 2. chain definitions move to the surviving armature
+    gprops.chains.clear()
+    for src in plotting.gesturebone_props.chains:
+        _copy_pg(src, gprops.chains.add())
+    for attr in ("meta_collection", "atomic_chain", "meta_rig_preset"):
+        setattr(gprops, attr, getattr(plotting.gesturebone_props, attr))
+
+    # 3. everything that pointed at the MetaPlot follows the deform bones:
+    #    Armature modifiers, parenting, Geometry Nodes Object inputs (the
+    #    meshes' "Bone-weight-Linear" reads its "Deform Armature" there), and
+    #    driver targets on other datablocks
+    plan["remapped"] = _remap_users(plotting, gesture)
+    def _is_link(u):     # being IN a collection / a scene's view-layer bases is fine
+        if isinstance(u, bpy.types.Collection):
+            return True
+        if isinstance(u, bpy.types.Scene):
+            gp = getattr(u, "gesturebone_props", None)
+            return (u.objects.get(plotting.name) is plotting
+                    and (gp is None or gp.current_armature is not plotting))
+        return False
+    leftovers = sorted(f"{type(u).__name__}:{u.name}" for u in bpy.data.user_map(subset={plotting})[plotting]
+                       if u is not gesture and u is not plotting and not _is_link(u))
+    if leftovers:
+        plan["errors"].append(f"still referencing {plotting.name}: {leftovers}")
+        return plan
+
+    # 4. one armature (join drops the action slot — restore it)
+    anim = _anim_state(gesture)
+    _join(gesture, plotting)
+    if not _restore_anim(gesture, anim):
+        plan["errors"].append("animation (action slot / NLA) could not be restored after join")
+
+    # 5. A/B handles
+    plan["renamed"] = len(_rename_handles(gesture))
+
+    # 6. curve machinery + samplers
+    bpy.context.view_layer.objects.active = gesture
+    built = []
+    for ch in plan["chains"]:
+        part, indices = ch["part"], ch["indices"]
+        miss = builder.missing_bones(gesture, part, indices)
+        if miss:
+            plan["errors"].append(f"{part}: missing after join {miss}")
+            continue
+        builder.build_chain(gesture, part, indices, plane)
+        # facing is relative to MCH-{part}.Up, which sits on -Y for 'ARMATURE'
+        # and on the root's (sign-matched) -Y-ish normal for 'ROOT'
+        builder.bind_samplers(gesture, part, indices, ch["samplers"], spacing, ch["facing"])
+        chain = next((c for c in gprops.chains if c.part_name == part), None)
+        if chain is not None:
+            builder.apply_layer_depth(gesture, part, chain.layer_depth)
+        built.append(part)
+    for pb in gesture.pose.bones:
+        for c in list(pb.constraints):
+            if c.type == 'GEOMETRY_ATTRIBUTE':
+                pb.constraints.remove(c)
+    plan["built"] = built
+    plan["non_simple_drivers"] = builder.non_simple_drivers(gesture)
+
+    # 7. curves are dead weight now
+    if delete_splines:
+        for n in plan["splines"]:
+            ob = bpy.data.objects.get(n)
+            if ob:
+                data = ob.data
+                bpy.data.objects.remove(ob)
+                if data and data.users == 0:
+                    bpy.data.curves.remove(data)
+        for coll in list(bpy.data.collections):
+            if coll.name.endswith((".GestureSplines", ".PlottingSplines")) and not coll.all_objects and not coll.children:
+                bpy.data.collections.remove(coll)
+
+    gprops.rig_type = UNIFIED
+    gprops.plotting_rig = None
+    # join leaves the source object datablock behind (still referenced by the
+    # pointers cleared above) — drop it so nothing can resolve to it again
+    leftover = bpy.data.objects.get(plotting_name)
+    if leftover is not None and leftover is not gesture and not leftover.users_scene:
+        data = leftover.data
+        bpy.data.objects.remove(leftover)
+        if data is not None and data.users == 0:
+            bpy.data.armatures.remove(data)
+    for chain in gprops.chains:
+        chain.gesture_rig = gesture
+        chain.gesture_spline = None
+        chain.plotting_spline = None
+        chain.is_bound = True
+        chain.is_drawing = False
+    if bpy.context.object and bpy.context.object.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+    if not _restore_anim(gesture, anim):
+        plan["errors"].append("animation (action slot / NLA) changed during conversion")
+    plan["action_slot"] = anim and anim["slot"]
+    return plan

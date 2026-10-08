@@ -100,6 +100,10 @@ class GESTUREBONE_PG_ArmatureProps(bpy.types.PropertyGroup):
             ('PRESET',   "Rig Preset",
              "Template armature — appears in Create Rig dropdown"),
             ('NONE',     "Untagged", ""),
+            # Saved files store this enum by INDEX — new items go last, never in between.
+            ('UNIFIED',  "Single Rig",
+             "One armature: CTRL bones, B-Bone curve machinery and DEF bones together, "
+             "drawn with the Annotate tool (no curves, no Geometry Nodes)"),
         ],
         default='NONE',
         override={'LIBRARY_OVERRIDABLE'},
@@ -151,6 +155,36 @@ class GESTUREBONE_PG_ArmatureProps(bpy.types.PropertyGroup):
     show_both_armatures: BoolProperty(name="Show Both",         default=True, override={'LIBRARY_OVERRIDABLE'})
     show_generate_part: BoolProperty(name="Generate Part by Part", default=True, override={'LIBRARY_OVERRIDABLE'})
     show_debug_steps:   BoolProperty(name="Debug Steps",        default=False, override={'LIBRARY_OVERRIDABLE'})
+    deform_mode: EnumProperty(
+        name="Deform Mode",
+        items=[
+            ('SAMPLER', "Sampler", "Template STR/AXIS/SIZE/DEF bones read the hidden B-Bone spans"),
+            ('BBONE', "Blender Optimized", "The B-Bone spans (BDEF-) deform the mesh directly"),
+        ],
+        default='SAMPLER', override={'LIBRARY_OVERRIDABLE'})
+    export_segments: IntProperty(
+        name="Segments per Span",
+        description="Plain bones generated per B-Bone span for game export (preview before exporting)",
+        default=4, min=1, max=32, override={'LIBRARY_OVERRIDABLE'})
+    export_weights: EnumProperty(
+        name="Export Weights",
+        items=[
+            ('BBONE', "Match B-Bones", "Split each span's weight between its two nearest segment bones, "
+                                       "exactly like Blender deforms on the B-Bone - the export looks like the shot"),
+            ('NODE', "Weight Node", "Let the Bone-weight-Linear node weight the segment bones (live, tunable "
+                                    "on the preview copies)"),
+        ],
+        default='BBONE', override={'LIBRARY_OVERRIDABLE'})
+    export_path: StringProperty(
+        name="Export Path", subtype='FILE_PATH', default="//export/",
+        options={'PATH_SUPPORTS_BLEND_RELATIVE'},
+        description="Folder the FBX/glTF files are written to", override={'LIBRARY_OVERRIDABLE'})
+    auto_single_rig:    BoolProperty(
+        name="Single Rig",
+        description="Finish Auto Rig by merging everything into one armature — no Gesture/Plotting "
+                    "curves, no Geometry Nodes, drawn with the Annotate tool. The Plotting rig stops "
+                    "existing, so re-rigging a part afterwards needs the two-rig setup",
+        default=False, override={'LIBRARY_OVERRIDABLE'})
 
     # ── EXPRESSION SHEET: per-bone sprite sheets ──────────────────────────────
     # USE_INSERTION so a downstream file can register NEW expression bones on

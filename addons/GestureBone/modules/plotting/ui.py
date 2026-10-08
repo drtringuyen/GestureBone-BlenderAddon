@@ -170,6 +170,7 @@ def draw_plotting_ui(layout, context, arm):
     auto_row.operator("gesturebone.delete_sample_folder", text="", icon='ORPHAN_DATA')
     auto_row.operator("gesturebone.toggle_meta_collection", text="", icon=meta_icon,
                       depress=props.meta_solo_mode)
+    auto_row.prop(props, "auto_single_rig", text="", icon='AUTOMERGE_ON')
 
     # Row 2: labelled adjustment buttons filling the row
     util_row = ops_col.row(align=True)

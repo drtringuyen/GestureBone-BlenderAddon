@@ -4,6 +4,33 @@
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the current design.
 
+### Research: single rig (`research/single-rig`, Oct 2026)
+- **New `curvechain` module, single-armature rig.** Each chain's
+  Gesture/Plotting curves and their Geometry Nodes are replaced by hidden
+  B-Bone spans inside one armature. Exact-bezier ease drivers, even arc-length
+  sampling and a planar up-vector are all simple expressions, so there is no
+  Python driver evaluation. DEF bones and names are unchanged, and no
+  deforming bone uses B-Bones. The new rig type `UNIFIED` is appended last,
+  because `rig_type` is saved by index.
+- **Drawing uses the Annotate tool in Pose mode** (layer `GB:{part}`).
+  **Apply** fits the stroke and keys points + handles on the current frame,
+  and it also works on library overrides without localizing anything.
+- **`Convert to Single Rig` (Gesture panel)** and an **Auto Rig "Single Rig"
+  toggle** do the conversion. The converter re-points every MetaPlot user,
+  including the meshes' GN *Deform Armature* input, and restores the action
+  slot that `object.join()` drops. It also renames handles `.hL/.hR` →
+  `.hA/.hB`.
+- **New `export` module** (Export box under the chain cards):
+  - **Bake Weights / Live:** bakes the Bone-weight-Linear result and mutes
+    the modifier, so it can be restored.
+  - **Optimize:** switches to Blender Optimized, where the B-Bone spans deform
+    directly as `BDEF-*`. The weight node gets a `BDEF-` prefix.
+  - **Game export:** a temporary segment-bone rig, exported as Unity FBX or
+    Godot glTF.
+  - **Repair ANIM File:** renames old handle keys in overriding files.
+- Design, measurements and limits are in
+  [docs/single-rig-design.md](docs/single-rig-design.md).
+
 ### Architecture (unified rig model)
 - **Two-rig model**: every armature is tagged `rig_type`
   (`PLOTTING` / `GESTURE` / `PRESET` / `NONE`). The PLOTTING rig (MetaRig) owns
@@ -209,6 +236,23 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the current design.
   no driver, node, bake or export consuming it. It also sat directly above the
   bone's `exp_index` in the panel showing an unrelated number, which read as if
   the two were the same thing.
+
+### Fixed (Sep 2026)
+- **Expression Sheet: a manual rewire of a UV From Bone (Shared) input no
+  longer gets stomped on file open.** Patching your own node chain in front of
+  `Bone UV` (or `Bone Scale` / `Exp Index In`) survived a save but was silently
+  destroyed on the next reopen — the `load_post` self-heal
+  (`migrate_legacy_drivers` -> `refresh_uv_from_bone_shared`) ran
+  `_ensure_attr_feed`, whose auto-wire only skipped a socket already fed by
+  that exact Attribute output and otherwise called `links.new()`, which
+  replaces whatever link is there. It now reconnects only a socket that is
+  EMPTY or still fed by one of the instance's own satellites
+  (`_own_satellite_names`: both schemas' `__ATTR_*` feeds plus `__UVForBone`);
+  any other source is treated as a deliberate user edit and left alone. The
+  self-heal this loop exists for — repointing a stale/wrong satellite — is
+  unaffected. Verified live on Blender 5.2 against a real instance: a patched
+  user node survives the refresh, while an empty socket and one fed by the
+  wrong own satellite are both still rewired correctly.
 
 ### Changed (Aug 2026)
 - **Expression Sheet: Pose-mode expression-grid hotkey is now user-rebindable.**
